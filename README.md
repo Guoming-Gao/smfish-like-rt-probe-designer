@@ -14,32 +14,32 @@ This tool combines the thermodynamic rigor of Oligostan probe design with:
 ## Quick Start
 
 Install dependencies
-pip install -r requirements.txt
+```pip install -r requirements.txt```
 
 Run with test gene set
-python main.py --test --output ./test_output
+```python main.py --test --output ./test_output```
 
 Run with specific genes
-python main.py --genes Nanog Pou5f1 Sox2 --output ./my_analysis
+```python main.py --genes Nanog Pou5f1 Sox2 --output ./my_analysis```
 
 Run with custom gene list from config
-python main.py --output ./full_analysis
+```python main.py --output ./full_analysis```
+
 
 
 ## Features
 
-✅ **Gene Symbol Input**: Automatic sequence fetching via Ensembl API
-✅ **Thermodynamic Optimization**: Proven Oligostan algorithm (dG37 = -32.0)
-✅ **Strand-Aware Coverage**: Precise 100nt downstream RT coverage calculation
-✅ **SNP Analysis**: Coverage profiling for allelic expression studies
-✅ **BLAST Filtering**: Remove non-specific probes automatically
-✅ **Batch Processing**: Process multiple genes efficiently
-✅ **Comprehensive Output**: Consolidated CSV with all metrics
+- ✅ **Gene Symbol Input**: Automatic sequence fetching via Ensembl API
+- ✅ **Thermodynamic Optimization**: Proven Oligostan algorithm (dG37 = -32.0)
+- ✅ **Strand-Aware Coverage**: Precise 100nt downstream RT coverage calculation
+- ✅ **SNP Analysis**: Coverage profiling for allelic expression studies
+- ✅ **BLAST Filtering**: Remove non-specific probes automatically
+- ✅ **Batch Processing**: Process multiple genes efficiently
+- ✅ **Comprehensive Output**: Consolidated CSV with all metrics
 
 ## Configuration
 
 Edit `config.py` to customize:
-
 
 ```
 FISH_RT_CONFIG = {
