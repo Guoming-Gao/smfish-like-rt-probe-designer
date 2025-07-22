@@ -39,7 +39,7 @@ python main.py --output ./full_analysis
 ## Configuration
 
 Edit `config.py` to customize:
-"""
+'''
 FISH_RT_CONFIG = {
 'gene_list': ['Nanog', 'Pou5f1', 'Sox2'], # Your genes
 'species': 'mouse', # Currently mouse only
@@ -48,7 +48,7 @@ FISH_RT_CONFIG = {
 'local_snp_file1': '/path/to/snps1.txt', # Your SNP files
 'blast_database_path': '/path/to/blast_db' # BLAST database
 }
-"""
+'''
 
 ## Requirements
 
