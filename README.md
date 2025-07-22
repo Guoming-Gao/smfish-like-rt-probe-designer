@@ -13,16 +13,16 @@ This tool combines the thermodynamic rigor of Oligostan probe design with:
 
 ## Quick Start
 
-Install dependencies
+Install dependencies\
 ```pip install -r requirements.txt```
 
-Run with test gene set
+Run with test gene set\
 ```python main.py --test --output ./test_output```
 
-Run with specific genes
+Run with specific genes\
 ```python main.py --genes Nanog Pou5f1 Sox2 --output ./my_analysis```
 
-Run with custom gene list from config
+Run with custom gene list from config\
 ```python main.py --output ./full_analysis```
 
 
