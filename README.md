@@ -29,13 +29,13 @@ Run with custom gene list from config\
 
 ## Features
 
-- ✅ **Gene Symbol Input**: Automatic sequence fetching via Ensembl API
-- ✅ **Thermodynamic Optimization**: Proven Oligostan algorithm (dG37 = -32.0)
-- ✅ **Strand-Aware Coverage**: Precise 100nt downstream RT coverage calculation
-- ✅ **SNP Analysis**: Coverage profiling for allelic expression studies
-- ✅ **BLAST Filtering**: Remove non-specific probes automatically
-- ✅ **Batch Processing**: Process multiple genes efficiently
-- ✅ **Comprehensive Output**: Consolidated CSV with all metrics
+- **Gene Symbol Input**: Automatic sequence fetching via Ensembl API
+- **Thermodynamic Optimization**: Proven Oligostan algorithm (dG37 = -32.0)
+- **Strand-Aware Coverage**: Precise 100nt downstream RT coverage calculation
+- **SNP Analysis**: Coverage profiling for allelic expression studies
+- **BLAST Filtering**: Remove non-specific probes automatically
+- **Batch Processing**: Process multiple genes efficiently
+- **Comprehensive Output**: Consolidated CSV with all metrics
 
 ## Configuration
 
