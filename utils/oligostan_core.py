@@ -1,4 +1,4 @@
-# utils/oligostan_core.py - Modified Oligostan Core with Complete PNAS Calculations
+# utils/oligostan_core.py - Modified Oligostan Core (No BLAST placeholders)
 
 import numpy as np
 from .thermodynamics import dg_calc_rna_37, dg37_score_calc
@@ -218,23 +218,23 @@ def design_fish_probes(gene_data, config):
                 probe["sequence"], config["pnas_filter_rules"]
             )
 
-            # FIXED: Apply individual PNAS filters (these were missing!)
+            # Apply individual PNAS filters
             a_comp_pass = 1 if is_it_ok_4_a_comp(probe["sequence"]) else 0
             a_stack_pass = 1 if is_it_ok_4_a_stack(probe["sequence"]) else 0
             c_comp_pass = 1 if is_it_ok_4_c_comp(probe["sequence"]) else 0
             c_stack_pass = 1 if is_it_ok_4_c_stack(probe["sequence"]) else 0
             c_spec_pass = 1 if is_it_ok_4_c_spec_stack(probe["sequence"]) else 0
 
-            # FIXED: Calculate PNAS sum (this was missing!)
+            # Calculate PNAS sum
             nb_of_pnas = (
                 a_comp_pass + a_stack_pass + c_comp_pass + c_stack_pass + c_spec_pass
             )
 
-            # Create probe record with ALL required fields
+            # Create probe record with ALL required fields (NO BLAST placeholders)
             probe_record = {
                 # Gene information
                 "GeneName": gene_data["gene_name"],
-                "Species": "mouse",  # FIXED: Hardcoded since we only support mm10
+                "Species": "mouse",
                 "Chromosome": gene_data["chromosome"],
                 "RegionType": region_type,  # 'exon', 'intron', or 'exon-intron'
                 # Probe sequence and position (mm10 coordinates)
@@ -253,14 +253,14 @@ def design_fish_probes(gene_data, config):
                 "GCpc": gc_percentage,
                 "GCFilter": 1 if gc_filter else 0,
                 "PNASFilter": 1 if pnas_filter else 0,
-                # FIXED: Individual PNAS filter results (these were missing!)
+                # Individual PNAS filter results
                 "aCompFilter": a_comp_pass,
                 "aStackFilter": a_stack_pass,
                 "cCompFilter": c_comp_pass,
                 "cStackFilter": c_stack_pass,
                 "cSpecStackFilter": c_spec_pass,
-                "NbOfPNAS": nb_of_pnas,  # FIXED: This was the main missing field!
-                # Placeholders for later analysis (these will be filled by other modules)
+                "NbOfPNAS": nb_of_pnas,
+                # Placeholders for SNP analysis (will be filled by snp_analyzer)
                 "SNPs_Covered_Count": 0,
                 "SNPs_Covered_Positions": "",
                 "SNPs_Covered_Types": "",
@@ -268,14 +268,9 @@ def design_fish_probes(gene_data, config):
                 "RT_Coverage_End": 0,
                 "RT_Coverage_Strand": ".",
                 "RTBC_5Prime_Sequence": "",  # Will be added by output generator
-                "NumberOfHits": 0,  # BLAST results
-                "PercentAlignment": 0,  # BLAST results
-                "UniqueHitName": "",  # BLAST results
-                "BLAST_Start": 0,  # BLAST results
-                "BLAST_End": 0,  # BLAST results
                 # Additional fields for compatibility
-                "InsideUTR": 0,  # Default value (not used in current analysis)
-                "MaskedFilter": 1,  # Default pass (dustmasker not enabled by default)
+                "InsideUTR": 0,  # Default value
+                "MaskedFilter": 1,  # Default pass (dustmasker not enabled)
                 "RepeatMaskerPC": 0.0,  # Default no masking
             }
 

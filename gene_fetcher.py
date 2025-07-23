@@ -1,41 +1,48 @@
-# gene_fetcher.py - Local Genome File Integration (No Ensembl API)
+# gene_fetcher.py - Local Genome FASTA Integration (Simplified)
 
 import os
+import subprocess
 from pathlib import Path
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from rich.console import Console
-import subprocess
 
 console = Console()
 
 
 class GeneSequenceFetcher:
-    """Fetch gene sequences from local genome files (No Ensembl API)"""
+    """Fetch gene sequences from local FASTA file and GTF annotation"""
 
     def __init__(self, config):
         self.config = config
         self.genome_build = config.get("genome_build", "mm10")
-        self.local_genome_dir = config.get("local_genome_directory", "")
-        self.gene_annotation_file = config.get("gene_annotation_file", "")
 
-        # Check if local files are available
+        # FIXED: Use the correct config keys
+        self.local_genome_fasta = config.get("local_genome_fasta_path", "")
+        self.local_gtf_path = config.get("local_gtf_path", "")
+        self.transcript_selection = config.get("transcript_selection", "longest")
+
+        # FIXED: Check FASTA file exists (not directory)
         self.use_demo_mode = not (
-            self.local_genome_dir and os.path.exists(self.local_genome_dir)
+            self.local_genome_fasta and os.path.exists(self.local_genome_fasta)
         )
 
         if self.use_demo_mode:
             console.print(
-                "[yellow]⚠️  Local genome files not configured - using demo mode[/yellow]"
+                "[yellow]⚠️  Local genome FASTA not found - using demo mode[/yellow]"
             )
-            console.print(
-                "[yellow]   Will use samtools faidx to fetch sequences from online[/yellow]"
-            )
+            console.print(f"[yellow]   Looking for: {self.local_genome_fasta}[/yellow]")
         else:
             console.print(
-                f"[cyan]Using local genome directory: {self.local_genome_dir}[/cyan]"
+                f"[cyan]✅ Using local genome FASTA: {self.local_genome_fasta}[/cyan]"
             )
+            if self.local_gtf_path and os.path.exists(self.local_gtf_path):
+                console.print(f"[cyan]✅ Using local GTF: {self.local_gtf_path}[/cyan]")
+            else:
+                console.print(
+                    f"[yellow]⚠️  GTF not found: {self.local_gtf_path}[/yellow]"
+                )
 
         console.print(f"[cyan]Genome build: {self.genome_build}[/cyan]")
 
@@ -54,8 +61,105 @@ class GeneSequenceFetcher:
             console.print(f"[red]Error fetching {gene_symbol}: {str(e)}[/red]")
             return None
 
+    def _fetch_local_sequence(self, gene_symbol):
+        """Fetch sequence from local FASTA file using samtools faidx"""
+        from config import DEMO_GENE_COORDS
+
+        # For now, use demo coordinates with local FASTA
+        # TODO: Implement GTF parsing for real gene coordinates
+        if gene_symbol not in DEMO_GENE_COORDS:
+            console.print(
+                f"[red]Gene {gene_symbol} not found in demo coordinates[/red]"
+            )
+            return None
+
+        gene_info = DEMO_GENE_COORDS[gene_symbol]
+
+        # Extract sequence using samtools faidx
+        chromosome = gene_info["chromosome"]
+        start = gene_info["start"]
+        end = gene_info["end"]
+        strand = gene_info["strand"]
+
+        try:
+            # Use samtools faidx to extract real sequence from local FASTA
+            sequence = self._extract_genomic_sequence(chromosome, start, end)
+
+            if not sequence:
+                console.print(
+                    f"[red]Failed to extract sequence for {gene_symbol}[/red]"
+                )
+                return None
+
+            console.print(
+                f"[green]✅ Extracted real sequence for {gene_symbol}: {len(sequence)} bp[/green]"
+            )
+
+            # Create mock exon/intron regions for now
+            exon_regions, intron_regions = self._create_mock_regions(len(sequence))
+
+            return {
+                "gene_name": gene_symbol,
+                "gene_id": f"LOCAL_{gene_symbol}",
+                "transcript_id": f"LOCAL_{gene_symbol}_T1",
+                "biotype": gene_info["biotype"],
+                "chromosome": gene_info["chromosome"],
+                "strand": 1 if strand == "+" else -1,
+                "genomic_start": start,
+                "genomic_end": end,
+                "sequence": sequence,
+                "sequence_type": "genomic",
+                "exon_regions": exon_regions,
+                "intron_regions": intron_regions,
+                "transcript_length": len(sequence),
+                "genome_build": self.genome_build,
+                "source": "local_fasta",
+            }
+
+        except Exception as e:
+            console.print(
+                f"[red]Failed to fetch local sequence for {gene_symbol}: {e}[/red]"
+            )
+            return None
+
+    def _extract_genomic_sequence(self, chromosome, start, end):
+        """Extract genomic sequence using samtools faidx from local FASTA"""
+        try:
+            # Construct region string
+            region = f"{chromosome}:{start}-{end}"
+
+            # FIXED: Use local FASTA file path
+            cmd = ["samtools", "faidx", self.local_genome_fasta, region]
+
+            console.print(f"[cyan]Extracting {region} from local FASTA...[/cyan]")
+
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+            # Parse FASTA output
+            lines = result.stdout.strip().split("\n")
+            if len(lines) < 2:
+                console.print(f"[red]Invalid samtools output for {region}[/red]")
+                return None
+
+            # Join sequence lines (skip header)
+            sequence = "".join(lines[1:]).upper()
+
+            return sequence
+
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]samtools error for {region}: {e}[/red]")
+            console.print(f"[red]Command: {' '.join(cmd)}[/red]")
+            console.print(f"[red]stderr: {e.stderr}[/red]")
+            return None
+        except FileNotFoundError:
+            console.print(f"[red]samtools not found. Please install samtools.[/red]")
+            return None
+        except Exception as e:
+            console.print(f"[red]Sequence extraction error: {e}[/red]")
+            return None
+
     def _fetch_demo_sequence(self, gene_symbol):
-        """Fetch sequence using demo coordinates and samtools faidx"""
+        """Fetch sequence using demo coordinates and mock sequence"""
         from config import DEMO_GENE_COORDS
 
         if gene_symbol not in DEMO_GENE_COORDS:
@@ -66,60 +170,34 @@ class GeneSequenceFetcher:
 
         gene_info = DEMO_GENE_COORDS[gene_symbol]
 
-        # Use samtools faidx to fetch sequence from UCSC
-        chromosome = gene_info["chromosome"]
-        start = gene_info["start"]
-        end = gene_info["end"]
-        strand = gene_info["strand"]
+        # Calculate sequence length
+        sequence_length = gene_info["end"] - gene_info["start"] + 1
+        mock_sequence = self._generate_mock_sequence(sequence_length, gene_symbol)
 
-        # Try to fetch sequence using samtools faidx
-        try:
-            # Construct region string
-            region = f"{chromosome}:{start}-{end}"
-
-            # For demo, create a mock sequence (in real implementation, use samtools faidx)
-            sequence_length = end - start + 1
-            mock_sequence = self._generate_mock_sequence(sequence_length, gene_symbol)
-
-            console.print(
-                f"[green]✅ Generated demo sequence for {gene_symbol}: {len(mock_sequence)} bp[/green]"
-            )
-
-            # Create mock exon/intron regions for demo
-            exon_regions, intron_regions = self._create_mock_regions(sequence_length)
-
-            return {
-                "gene_name": gene_symbol,
-                "gene_id": f"DEMO_{gene_symbol}",
-                "transcript_id": f"DEMO_{gene_symbol}_T1",
-                "biotype": gene_info["biotype"],
-                "chromosome": gene_info["chromosome"],
-                "strand": 1 if strand == "+" else -1,
-                "genomic_start": start,
-                "genomic_end": end,
-                "sequence": mock_sequence,
-                "sequence_type": "genomic",
-                "exon_regions": exon_regions,
-                "intron_regions": intron_regions,
-                "transcript_length": sequence_length,
-                "genome_build": self.genome_build,
-                "source": "demo_coordinates",
-            }
-
-        except Exception as e:
-            console.print(
-                f"[red]Failed to fetch demo sequence for {gene_symbol}: {e}[/red]"
-            )
-            return None
-
-    def _fetch_local_sequence(self, gene_symbol):
-        """Fetch sequence from local genome files"""
-        # This would implement reading from local FASTA files
-        # For now, fall back to demo mode
         console.print(
-            f"[yellow]Local genome fetching not yet implemented, using demo mode[/yellow]"
+            f"[green]✅ Generated demo sequence for {gene_symbol}: {len(mock_sequence)} bp[/green]"
         )
-        return self._fetch_demo_sequence(gene_symbol)
+
+        # Create mock exon/intron regions
+        exon_regions, intron_regions = self._create_mock_regions(sequence_length)
+
+        return {
+            "gene_name": gene_symbol,
+            "gene_id": f"DEMO_{gene_symbol}",
+            "transcript_id": f"DEMO_{gene_symbol}_T1",
+            "biotype": gene_info["biotype"],
+            "chromosome": gene_info["chromosome"],
+            "strand": 1 if gene_info["strand"] == "+" else -1,
+            "genomic_start": gene_info["start"],
+            "genomic_end": gene_info["end"],
+            "sequence": mock_sequence,
+            "sequence_type": "genomic",
+            "exon_regions": exon_regions,
+            "intron_regions": intron_regions,
+            "transcript_length": sequence_length,
+            "genome_build": self.genome_build,
+            "source": "demo_coordinates",
+        }
 
     def _generate_mock_sequence(self, length, gene_symbol):
         """Generate a realistic mock DNA sequence for testing"""

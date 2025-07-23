@@ -30,7 +30,7 @@ FISH_RT_CONFIG = {
     "output_directory": "/Users/gmgao/Dropbox/Caltech_PostDoc_GuttmanLab/constructs_and_smiFISH/smFISH_like_focusedRT-XCI",
     # LOCAL FILE PATHS (Simplified - direct paths)
     "genome_build": "mm10",
-    "local_gtf_path": "/Volumes/guttman-1/annotations/mm10/Mus_musculus.GRCm38.96.sorted.gtf",
+    "local_gtf_path": "/Volumes/guttman-1/annotations/mm10/Mus_musculus.GRCm38.96.gtf",
     "local_genome_fasta_path": "/Volumes/guttman-1/genomes/mm10/mm10withchr.fa",
     "snp_file_path": "/Volumes/guttman-1/data/snps/Bl6xCast.mm10.snps",
     # RT COVERAGE SETTINGS
