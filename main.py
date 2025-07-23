@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - smfish-like-rt-probe-designer Main Pipeline (Local Genome)
+# main.py - SIMPLIFIED (No BLAST Integration)
 
 import os
 import sys
@@ -9,12 +9,11 @@ from pathlib import Path
 from rich.progress import track
 from rich.console import Console
 
-# Import our modules
+# Import our modules (BLAST module removed)
 from config import FISH_RT_CONFIG, TEST_GENES_21
 from gene_fetcher import GeneSequenceFetcher
 from utils.oligostan_core import design_fish_probes
 from snp_analyzer import SNPCoverageAnalyzer
-from blast_analyzer import BLASTSpecificityAnalyzer
 from output_generator import OutputGenerator
 
 console = Console()
@@ -25,26 +24,28 @@ def setup_output_directory(output_path):
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Create subdirectories
+    # Create subdirectories (removed blast_results)
     (output_path / "gene_sequences").mkdir(exist_ok=True)
-    (output_path / "blast_results").mkdir(exist_ok=True)
     (output_path / "snp_analysis").mkdir(exist_ok=True)
+    (output_path / "fasta_for_blast").mkdir(exist_ok=True)
 
     return output_path
 
 
 def main():
-    """Main FISH-RT probe design pipeline (Local Genome)"""
+    """Main FISH-RT probe design pipeline (Manual BLAST workflow)"""
 
     console.print(
-        "[bold blue]🧬 smfish-like-rt-probe-designer (Local Genome)[/bold blue]"
+        "[bold blue]🧬 smfish-like-rt-probe-designer (Manual BLAST)[/bold blue]"
     )
     console.print("=" * 60)
-    console.print("[cyan]Genome source: Local files / Demo coordinates[/cyan]")
+    console.print(
+        "[cyan]Workflow: Design → Filter → Export FASTA → Manual NCBI BLAST[/cyan]"
+    )
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Design FISH probes for RT-PCR with SNP analysis"
+        description="Design FISH probes for RT-PCR with manual BLAST workflow"
     )
     parser.add_argument("--config", help="Path to custom config file")
     parser.add_argument("--output", help="Output directory path")
@@ -76,29 +77,24 @@ def main():
     output_path = setup_output_directory(config["output_directory"])
     console.print(f"[green]Output directory: {output_path}[/green]")
 
-    # Check configuration status
+    # Check configuration status (BLAST removed)
     console.print("\n[bold]Configuration Status:[/bold]")
     console.print(
-        f"  Local genome directory: {'✅ Configured' if config['local_genome_directory'] else '❌ Not configured'}"
+        f"  Local genome FASTA: {'✅ Available' if config['local_genome_fasta_path'] else '❌ Not configured'}"
     )
     console.print(
         f"  SNP file: {'✅ Available' if config['snp_file_path'] else '❌ Not configured'}"
     )
-    console.print(
-        f"  BLAST database: {'✅ Available' if config['blast_database_path'] else '❌ Not configured'}"
-    )
+    console.print(f"  Manual BLAST: ✅ FASTA files will be generated")
 
-    # Initialize components
+    # Initialize components (BLAST analyzer removed)
     console.print("\n[bold]Initializing pipeline components...[/bold]")
 
     gene_fetcher = GeneSequenceFetcher(config)
     snp_analyzer = SNPCoverageAnalyzer(config) if config["snp_file_path"] else None
-    blast_analyzer = (
-        BLASTSpecificityAnalyzer(config) if config["blast_database_path"] else None
-    )
     output_generator = OutputGenerator(config)
 
-    # Step 1: Fetch gene sequences (local/demo)
+    # Step 1: Fetch gene sequences
     console.print("\n[bold cyan]Step 1: Fetching gene sequences...[/bold cyan]")
 
     all_gene_data = []
@@ -179,26 +175,10 @@ def main():
             "\n[yellow]Step 3: SNP analysis skipped (no SNP file configured)[/yellow]"
         )
 
-    # Step 4: BLAST specificity analysis
-    if blast_analyzer and config["run_blast_analysis"]:
-        console.print("\n[bold cyan]Step 4: BLAST specificity analysis...[/bold cyan]")
-        try:
-            all_probes = blast_analyzer.analyze_probes(
-                all_probes, output_path / "blast_results"
-            )
-            unique_probes = [p for p in all_probes if p.get("NumberOfHits") == 1]
-            console.print(
-                f"✅ BLAST completed: {len(unique_probes)}/{len(all_probes)} probes are unique"
-            )
-        except Exception as e:
-            console.print(f"❌ BLAST analysis failed: {str(e)}")
-    else:
-        console.print(
-            "\n[yellow]Step 4: BLAST analysis skipped (not configured)[/yellow]"
-        )
-
-    # Step 5: Generate final output
-    console.print("\n[bold cyan]Step 5: Generating output files...[/bold cyan]")
+    # Step 4: Generate outputs with FASTA for manual BLAST
+    console.print(
+        "\n[bold cyan]Step 4: Generating outputs + BLAST FASTA files...[/bold cyan]"
+    )
 
     try:
         output_files = output_generator.generate_outputs(all_probes, output_path)
@@ -209,22 +189,20 @@ def main():
             console.print(f"  📄 {file_path}")
 
         # Print summary statistics
-        df_all = pd.read_csv(output_files[0])  # ALL file
-        df_filt = pd.read_csv(output_files[1]) if len(output_files) > 1 else df_all
+        csv_files = [f for f in output_files if str(f).endswith(".csv")]
+        if csv_files:
+            df_all = pd.read_csv(csv_files[0])  # First CSV file
+            df_filt = pd.read_csv(csv_files[1]) if len(csv_files) > 1 else df_all
 
-        console.print(f"\n[bold]📊 Final Summary:[/bold]")
-        console.print(f"  Total probes designed: {len(df_all)}")
-        console.print(f"  Probes after filtering: {len(df_filt)}")
-        console.print(f"  Genes processed: {len(set(df_all['GeneName']))}")
-        console.print(f"  Output directory: {output_path}")
+            console.print(f"\n[bold]📊 Final Summary:[/bold]")
+            console.print(f"  Total probes designed: {len(df_all)}")
+            console.print(f"  Probes after quality filtering: {len(df_filt)}")
+            console.print(f"  Genes processed: {len(set(df_all['GeneName']))}")
+            console.print(f"  Output directory: {output_path}")
 
-        if "SNPs_Covered_Count" in df_all.columns:
-            avg_snps = df_all["SNPs_Covered_Count"].mean()
-            console.print(f"  Average SNPs covered per probe: {avg_snps:.1f}")
-
-        if "NumberOfHits" in df_all.columns:
-            unique_pct = (df_all["NumberOfHits"] == 1).mean() * 100
-            console.print(f"  Probes with unique BLAST hits: {unique_pct:.1f}%")
+            if "SNPs_Covered_Count" in df_all.columns:
+                avg_snps = df_all["SNPs_Covered_Count"].mean()
+                console.print(f"  Average SNPs covered per probe: {avg_snps:.1f}")
 
     except Exception as e:
         console.print(f"[red]❌ Output generation failed: {str(e)}[/red]")

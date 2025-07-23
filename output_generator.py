@@ -1,4 +1,4 @@
-# output_generator.py - Generate Consolidated Outputs for FISH-RT Analysis
+# output_generator.py - Enhanced for Manual BLAST Workflow (No Local BLAST)
 
 import pandas as pd
 import os
@@ -12,24 +12,29 @@ console = Console()
 
 
 class OutputGenerator:
-    """Generate consolidated output files for FISH-RT probe analysis"""
+    """Generate outputs optimized for manual NCBI BLAST workflow"""
 
     def __init__(self, config):
         self.config = config
         self.add_rtbc = config.get("add_rtbc_barcode", True)
         self.rtbc_sequence = config.get("rtbc_sequence", "/5Phos/TGACTTGAGGAT")
-        self.require_unique_hits = config.get("require_unique_hits_only", True)
+        self.generate_blast_fasta = config.get("generate_blast_fasta", True)
+        self.fasta_description_format = config.get(
+            "fasta_description_format", "detailed"
+        )
 
     def generate_outputs(self, probe_list, output_dir):
         """
-        Generate all output files for FISH-RT analysis
+        Generate all output files optimized for manual BLAST workflow
         Returns list of generated file paths
         """
         output_dir = Path(output_dir)
         generated_files = []
 
         try:
-            console.print("[cyan]Generating output files...[/cyan]")
+            console.print(
+                "[cyan]Generating outputs for manual BLAST workflow...[/cyan]"
+            )
 
             # Add RTBC barcodes to all probes
             probe_list_with_rtbc = self._add_rtbc_barcodes(probe_list)
@@ -37,10 +42,10 @@ class OutputGenerator:
             # Create comprehensive DataFrame
             df_all = pd.DataFrame(probe_list_with_rtbc)
 
-            # Sort by gene name, then by SNP coverage (descending)
+            # Sort by gene name, then by SNP coverage (descending), then by quality
             df_all = df_all.sort_values(
-                ["GeneName", "SNPs_Covered_Count", "NbOfPNAS"],
-                ascending=[True, False, False],
+                ["GeneName", "SNPs_Covered_Count", "NbOfPNAS", "GCpc"],
+                ascending=[True, False, False, False],
             )
 
             # Generate ALL probes file
@@ -49,9 +54,9 @@ class OutputGenerator:
             generated_files.append(all_file)
             console.print(f"✅ Generated: {all_file}")
 
-            # Generate FILTERED probes file
-            filtered_df = self._apply_filters(df_all)
-            filt_file = output_dir / "FISH_RT_probes_FILT.csv"
+            # Generate FILTERED probes file (GC + PNAS only, no BLAST)
+            filtered_df = self._apply_quality_filters(df_all)
+            filt_file = output_dir / "FISH_RT_probes_FILTERED.csv"
             filtered_df.to_csv(filt_file, index=False)
             generated_files.append(filt_file)
             console.print(f"✅ Generated: {filt_file}")
@@ -60,9 +65,12 @@ class OutputGenerator:
             summary_file = self._generate_summary(df_all, filtered_df, output_dir)
             generated_files.append(summary_file)
 
-            # Generate FASTA files
-            fasta_files = self._generate_fasta_files(df_all, filtered_df, output_dir)
-            generated_files.extend(fasta_files)
+            # Generate FASTA files for manual BLAST
+            if self.generate_blast_fasta:
+                fasta_files = self._generate_blast_fasta_files(
+                    df_all, filtered_df, output_dir
+                )
+                generated_files.extend(fasta_files)
 
             console.print(
                 f"[green]Generated {len(generated_files)} output files[/green]"
@@ -91,8 +99,8 @@ class OutputGenerator:
 
         return probe_list
 
-    def _apply_filters(self, df_all):
-        """Apply filtering criteria to get final probe set"""
+    def _apply_quality_filters(self, df_all):
+        """Apply quality filters (GC + PNAS only, no BLAST)"""
 
         # Start with all probes
         filtered = df_all.copy()
@@ -104,13 +112,7 @@ class OutputGenerator:
         filtered = filtered[basic_filter]
         console.print(f"After GC+PNAS filters: {len(filtered)} probes")
 
-        # Filter 2: BLAST uniqueness (if required)
-        if self.require_unique_hits and "NumberOfHits" in filtered.columns:
-            blast_filter = filtered["NumberOfHits"] == 1
-            filtered = filtered[blast_filter]
-            console.print(f"After BLAST uniqueness filter: {len(filtered)} probes")
-
-        # Filter 3: dustmasker (if enabled)
+        # Filter 2: dustmasker (if enabled)
         if "MaskedFilter" in filtered.columns and self.config.get(
             "use_dustmasker", False
         ):
@@ -133,9 +135,17 @@ class OutputGenerator:
                 # Overall statistics
                 f.write("OVERALL STATISTICS:\n")
                 f.write(f"  Total probes designed: {len(df_all)}\n")
-                f.write(f"  Probes after filtering: {len(df_filtered)}\n")
+                f.write(f"  Probes after quality filtering: {len(df_filtered)}\n")
                 f.write(
-                    f"  Filtering efficiency: {len(df_filtered)/len(df_all)*100:.1f}%\n\n"
+                    f"  Quality filtering efficiency: {len(df_filtered)/len(df_all)*100:.1f}%\n\n"
+                )
+
+                f.write("MANUAL BLAST WORKFLOW:\n")
+                f.write(f"  1. Use the generated FASTA files for NCBI BLAST\n")
+                f.write(f"  2. Submit to: https://blast.ncbi.nlm.nih.gov/Blast.cgi\n")
+                f.write(f"  3. Use 'Mouse genomic + transcript' database\n")
+                f.write(
+                    f"  4. Filter results for unique hits (1 significant hit only)\n\n"
                 )
 
                 # Gene-level statistics
@@ -172,13 +182,8 @@ class OutputGenerator:
                     f.write(f"  Average dG37 score: {df_all['dGScore'].mean():.3f}\n")
 
                     if "SNPs_Covered_Count" in df_all.columns:
-                        f.write(
-                            f"  Average SNPs covered: {df_all['SNPs_Covered_Count'].mean():.1f}\n"
-                        )
-
-                    if "NumberOfHits" in df_all.columns:
-                        unique_pct = (df_all["NumberOfHits"] == 1).mean() * 100
-                        f.write(f"  Probes with unique BLAST hits: {unique_pct:.1f}%\n")
+                        avg_snps = df_all["SNPs_Covered_Count"].mean()
+                        f.write(f"  Average SNPs covered per probe: {avg_snps:.1f}\n")
 
                     f.write("\n")
 
@@ -191,10 +196,6 @@ class OutputGenerator:
                     f"  PNAS filter pass: {(df_all['PNASFilter'] == 1).sum()}/{len(df_all)}\n"
                 )
 
-                if "NumberOfHits" in df_all.columns:
-                    unique_count = (df_all["NumberOfHits"] == 1).sum()
-                    f.write(f"  BLAST unique hits: {unique_count}/{len(df_all)}\n")
-
                 if "MaskedFilter" in df_all.columns:
                     masked_pass = (df_all["MaskedFilter"] == 1).sum()
                     f.write(f"  dustmasker filter pass: {masked_pass}/{len(df_all)}\n")
@@ -206,58 +207,96 @@ class OutputGenerator:
             console.print(f"[red]Error generating summary: {str(e)}[/red]")
             return None
 
-    def _generate_fasta_files(self, df_all, df_filtered, output_dir):
-        """Generate FASTA files for probe sequences"""
+    def _generate_blast_fasta_files(self, df_all, df_filtered, output_dir):
+        """Generate FASTA files optimized for NCBI BLAST submission"""
         generated_files = []
 
         try:
-            # FASTA file for ALL probes (with RTBC)
-            all_fasta = output_dir / "FISH_RT_probes_ALL.fasta"
-            self._write_fasta(df_all, all_fasta, include_rtbc=True)
-            generated_files.append(all_fasta)
+            console.print("[cyan]Generating FASTA files for manual BLAST...[/cyan]")
 
-            # FASTA file for FILTERED probes (with RTBC)
-            filt_fasta = output_dir / "FISH_RT_probes_FILT.fasta"
-            self._write_fasta(df_filtered, filt_fasta, include_rtbc=True)
-            generated_files.append(filt_fasta)
+            # FASTA file 1: ALL probes (probe sequences only, no RTBC)
+            all_blast_fasta = output_dir / "ALL_probes_for_BLAST.fasta"
+            self._write_blast_fasta(
+                df_all, all_blast_fasta, "All probes for BLAST specificity check"
+            )
+            generated_files.append(all_blast_fasta)
 
-            # FASTA file for probe sequences only (no RTBC)
-            probes_only_fasta = output_dir / "FISH_RT_probe_sequences_only.fasta"
-            self._write_fasta(df_filtered, probes_only_fasta, include_rtbc=False)
-            generated_files.append(probes_only_fasta)
+            # FASTA file 2: FILTERED probes (probe sequences only, no RTBC)
+            filt_blast_fasta = output_dir / "FILTERED_probes_for_BLAST.fasta"
+            self._write_blast_fasta(
+                df_filtered, filt_blast_fasta, "Quality-filtered probes for BLAST"
+            )
+            generated_files.append(filt_blast_fasta)
 
-            console.print(f"✅ Generated {len(generated_files)} FASTA files")
+            # FASTA file 3: FILTERED probes with RTBC (for ordering)
+            filt_rtbc_fasta = output_dir / "FILTERED_probes_with_RTBC.fasta"
+            self._write_rtbc_fasta(df_filtered, filt_rtbc_fasta)
+            generated_files.append(filt_rtbc_fasta)
+
+            console.print(f"✅ Generated {len(generated_files)} FASTA files for BLAST")
+
+            # Print BLAST instructions
+            console.print("\n[bold yellow]📝 MANUAL BLAST INSTRUCTIONS:[/bold yellow]")
+            console.print("1. Go to: https://blast.ncbi.nlm.nih.gov/Blast.cgi")
+            console.print("2. Upload: FILTERED_probes_for_BLAST.fasta")
+            console.print("3. Database: Mouse genomic + transcript")
+            console.print("4. Look for probes with exactly 1 significant hit")
+            console.print("5. Use FILTERED_probes_with_RTBC.fasta for synthesis")
+
             return generated_files
 
         except Exception as e:
-            console.print(f"[red]Error generating FASTA files: {str(e)}[/red]")
+            console.print(f"[red]Error generating BLAST FASTA files: {str(e)}[/red]")
             return []
 
-    def _write_fasta(self, df, output_file, include_rtbc=True):
-        """Write DataFrame to FASTA file"""
+    def _write_blast_fasta(self, df, output_file, description):
+        """Write FASTA file optimized for BLAST (probe sequences only)"""
 
         records = []
 
         for idx, row in df.iterrows():
-            # Choose sequence based on RTBC preference
-            if include_rtbc and self.add_rtbc:
-                sequence = row["RTBC_5Prime_Sequence"]
-                seq_type = "with_RTBC"
-            else:
-                sequence = row["Seq"]
-                seq_type = "probe_only"
-
-            # Create descriptive FASTA header
+            # Use probe sequence only (no RTBC) for BLAST
+            sequence = row["Seq"]
             gene_name = row["GeneName"]
-            probe_size = row["ProbeSize"]
-            snp_count = row.get("SNPs_Covered_Count", 0)
-            region_type = row.get("RegionType", "unknown")
+            probe_id = f"probe_{idx}_{gene_name}"
 
-            description = f"{gene_name} | {seq_type} | size:{probe_size}nt | SNPs:{snp_count} | region:{region_type}"
+            if self.fasta_description_format == "detailed":
+                # Detailed description for tracking
+                description = (
+                    f"{gene_name} | {row['RegionType']} | "
+                    f"chr{row['Chromosome']}:{row['theStartPos']}-{row['theEndPos']} | "
+                    f"size:{row['ProbeSize']}nt | SNPs:{row.get('SNPs_Covered_Count', 0)} | "
+                    f"GC:{row['GCpc']:.2f} | dG:{row['dG37']:.1f}"
+                )
+            else:
+                # Simple description
+                description = f"{gene_name}_probe_{idx}"
 
-            record = SeqRecord(
-                Seq(sequence), id=f"{gene_name}_probe_{idx}", description=description
-            )
+            record = SeqRecord(Seq(sequence), id=probe_id, description=description)
             records.append(record)
 
         SeqIO.write(records, output_file, "fasta")
+        console.print(f"✅ BLAST FASTA: {output_file} ({len(records)} sequences)")
+
+    def _write_rtbc_fasta(self, df, output_file):
+        """Write FASTA file with RTBC sequences (for synthesis)"""
+
+        records = []
+
+        for idx, row in df.iterrows():
+            # Use RTBC sequence for synthesis
+            sequence = row["RTBC_5Prime_Sequence"]
+            gene_name = row["GeneName"]
+            probe_id = f"{gene_name}_RTBC_{idx}"
+
+            description = (
+                f"{gene_name} RT primer with RTBC | "
+                f"Probe:{row['Seq']} | RTBC:{self.rtbc_sequence} | "
+                f"Total length:{len(sequence)}nt"
+            )
+
+            record = SeqRecord(Seq(sequence), id=probe_id, description=description)
+            records.append(record)
+
+        SeqIO.write(records, output_file, "fasta")
+        console.print(f"✅ RTBC FASTA: {output_file} ({len(records)} sequences)")
