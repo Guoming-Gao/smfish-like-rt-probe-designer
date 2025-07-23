@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - smfish-like-rt-probe-designer Main Pipeline
+# main.py - smfish-like-rt-probe-designer Main Pipeline (Local Genome)
 
 import os
 import sys
@@ -34,24 +34,30 @@ def setup_output_directory(output_path):
 
 
 def main():
-    """Main FISH-RT probe design pipeline"""
+    """Main FISH-RT probe design pipeline (Local Genome)"""
 
-    console.print("[bold blue]🧬 smfish-like-rt-probe-designer[/bold blue]")
+    console.print(
+        "[bold blue]🧬 smfish-like-rt-probe-designer (Local Genome)[/bold blue]"
+    )
     console.print("=" * 60)
+    console.print("[cyan]Genome source: Local files / Demo coordinates[/cyan]")
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Design FISH probes for RT-PCR with SNP analysis"
     )
     parser.add_argument("--config", help="Path to custom config file")
-    parser.add_argument("--output", help="Output directory path", required=True)
+    parser.add_argument("--output", help="Output directory path")
     parser.add_argument("--genes", nargs="+", help="List of gene names to process")
     parser.add_argument("--test", action="store_true", help="Run with test gene set")
     args = parser.parse_args()
 
     # Load configuration
     config = FISH_RT_CONFIG.copy()
-    config["output_directory"] = args.output
+
+    # Update output directory
+    if args.output:
+        config["output_directory"] = args.output
 
     # Determine gene list
     if args.test:
@@ -70,30 +76,29 @@ def main():
     output_path = setup_output_directory(config["output_directory"])
     console.print(f"[green]Output directory: {output_path}[/green]")
 
-    # Check if required paths are configured
-    missing_paths = []
-    if not config["local_genome_directory"]:
-        missing_paths.append("local_genome_directory")
-    if not config["local_snp_file1"]:
-        missing_paths.append("local_snp_file1")
-    if not config["local_snp_file2"]:
-        missing_paths.append("local_snp_file2")
-
-    if missing_paths:
-        console.print(f"[red]Warning: Missing paths in config: {missing_paths}[/red]")
-        console.print("[yellow]Some features may be disabled[/yellow]")
+    # Check configuration status
+    console.print("\n[bold]Configuration Status:[/bold]")
+    console.print(
+        f"  Local genome directory: {'✅ Configured' if config['local_genome_directory'] else '❌ Not configured'}"
+    )
+    console.print(
+        f"  SNP file: {'✅ Available' if config['snp_file_path'] else '❌ Not configured'}"
+    )
+    console.print(
+        f"  BLAST database: {'✅ Available' if config['blast_database_path'] else '❌ Not configured'}"
+    )
 
     # Initialize components
     console.print("\n[bold]Initializing pipeline components...[/bold]")
 
     gene_fetcher = GeneSequenceFetcher(config)
-    snp_analyzer = SNPCoverageAnalyzer(config) if config["local_snp_file1"] else None
+    snp_analyzer = SNPCoverageAnalyzer(config) if config["snp_file_path"] else None
     blast_analyzer = (
         BLASTSpecificityAnalyzer(config) if config["blast_database_path"] else None
     )
     output_generator = OutputGenerator(config)
 
-    # Step 1: Fetch gene sequences
+    # Step 1: Fetch gene sequences (local/demo)
     console.print("\n[bold cyan]Step 1: Fetching gene sequences...[/bold cyan]")
 
     all_gene_data = []
@@ -104,7 +109,9 @@ def main():
             gene_data = gene_fetcher.fetch_gene_sequence(gene_name)
             if gene_data:
                 all_gene_data.append(gene_data)
-                console.print(f"✅ {gene_name}: {len(gene_data['sequence'])} bp")
+                console.print(
+                    f"✅ {gene_name}: {len(gene_data['sequence'])} bp ({gene_data['source']})"
+                )
             else:
                 failed_genes.append(gene_name)
                 console.print(f"❌ {gene_name}: Failed to fetch")
@@ -148,15 +155,28 @@ def main():
 
     # Step 3: SNP coverage analysis
     if snp_analyzer:
-        console.print("\n[bold cyan]Step 3: Analyzing SNP coverage...[/bold cyan]")
+        console.print("\n[bold cyan]Step 3: SNP coverage analysis...[/bold cyan]")
         try:
             all_probes = snp_analyzer.analyze_probes(all_probes)
-            console.print("✅ SNP coverage analysis completed")
+
+            # Report SNP coverage statistics
+            snp_counts = [p.get("SNPs_Covered_Count", 0) for p in all_probes]
+            avg_snps = sum(snp_counts) / len(snp_counts) if snp_counts else 0
+            max_snps = max(snp_counts) if snp_counts else 0
+            probes_with_snps = sum(1 for c in snp_counts if c > 0)
+
+            console.print(f"✅ SNP coverage analysis completed")
+            console.print(f"   Average SNPs per probe: {avg_snps:.1f}")
+            console.print(f"   Maximum SNPs per probe: {max_snps}")
+            console.print(
+                f"   Probes with SNPs: {probes_with_snps}/{len(all_probes)} ({probes_with_snps/len(all_probes)*100:.1f}%)"
+            )
+
         except Exception as e:
             console.print(f"❌ SNP analysis failed: {str(e)}")
     else:
         console.print(
-            "\n[yellow]Step 3: SNP analysis skipped (no SNP files configured)[/yellow]"
+            "\n[yellow]Step 3: SNP analysis skipped (no SNP file configured)[/yellow]"
         )
 
     # Step 4: BLAST specificity analysis
@@ -192,10 +212,11 @@ def main():
         df_all = pd.read_csv(output_files[0])  # ALL file
         df_filt = pd.read_csv(output_files[1]) if len(output_files) > 1 else df_all
 
-        console.print(f"\n[bold]📊 Summary Statistics:[/bold]")
+        console.print(f"\n[bold]📊 Final Summary:[/bold]")
         console.print(f"  Total probes designed: {len(df_all)}")
         console.print(f"  Probes after filtering: {len(df_filt)}")
         console.print(f"  Genes processed: {len(set(df_all['GeneName']))}")
+        console.print(f"  Output directory: {output_path}")
 
         if "SNPs_Covered_Count" in df_all.columns:
             avg_snps = df_all["SNPs_Covered_Count"].mean()

@@ -1,13 +1,12 @@
-# config.py - smfish-like-rt-probe-designer Configuration
+# config.py - smfish-like-rt-probe-designer Configuration (Local Genome Approach)
 import os
 
 # =============================================================================
-# MAIN CONFIGURATION
+# MAIN CONFIGURATION (LOCAL GENOME APPROACH)
 # =============================================================================
 
 FISH_RT_CONFIG = {
     # INPUT SETTINGS
-    "species": "mouse",  # Currently only 'mouse' supported
     "gene_list": [
         "Atrx",
         "Diaph2",
@@ -32,14 +31,14 @@ FISH_RT_CONFIG = {
         "Zfp42",
     ],
     "transcript_selection": "longest",  # 'longest', 'canonical', 'all'
-    "output_directory": "/path/to/output",  # Will be set by user
-    # SEQUENCE & ANNOTATION SOURCES (TO BE FILLED FROM JAVA PATHS)
-    "ensembl_release": "110",  # Match Java script if possible
-    "genome_build": "GRCm39",
-    "local_genome_directory": "",  # [your_args[3]_path] - TO BE FILLED
-    "local_snp_file1": "",  # [your_args[1]_path] - TO BE FILLED
-    "local_snp_file2": "",  # [your_args[2]_path] - TO BE FILLED
-    # RT COVERAGE SETTINGS (STRAND-AWARE!)
+    "output_directory": "/Users/gmgao/Dropbox/Caltech_PostDoc_GuttmanLab/constructs_and_smiFISH/smFISH_like_focusedRT-XCI",
+    # LOCAL GENOME & ANNOTATION SOURCES (NO MORE ENSEMBL API)
+    "genome_build": "mm10",  # Simplified identifier
+    "local_genome_directory": "",  # TO BE FILLED - path to local genome FASTA files
+    "gene_annotation_file": "",  # TO BE FILLED - path to gene annotation (GTF/GFF)
+    # SNP ANALYSIS (Single file approach)
+    "snp_file_path": "/Volumes/guttman-1/data/snps/Bl6xCast.mm10.snps",
+    # RT COVERAGE SETTINGS (STRAND-AWARE)
     "rt_coverage_downstream": 100,  # nt downstream in RNA 5'→3' direction
     "include_probe_in_coverage": False,  # Strictly downstream
     # RTBC BARCODE SETTINGS
@@ -48,8 +47,8 @@ FISH_RT_CONFIG = {
     # BLAST SPECIFICITY
     "blast_database_path": "",  # TO BE FILLED - path to BLAST database
     "require_unique_hits_only": True,  # Remove multi-hit probes
-    "run_blast_analysis": True,  # Enable BLAST specificity check
-    # OLIGOSTAN PARAMETERS (inherited from original)
+    "run_blast_analysis": False,  # Disabled by default until DB configured
+    # OLIGOSTAN PARAMETERS
     "fixed_dg37_value": -32.0,  # Fixed dG37 (no optimization)
     "score_min": 0.9,  # Minimum probe score threshold
     "probe_length_max": 32,  # Maximum probe length
@@ -116,3 +115,31 @@ TEST_GENES_21 = [
 ]
 
 TEST_GENES_SMALL = ["Nanog", "Pou5f1", "Sox2"]  # For quick testing
+
+# =============================================================================
+# DEMO GENE COORDINATES (mm10) - For testing when local files not available
+# =============================================================================
+
+DEMO_GENE_COORDS = {
+    "Nanog": {
+        "chromosome": "chr6",
+        "start": 122707489,
+        "end": 122714633,
+        "strand": "+",
+        "biotype": "protein_coding",
+    },
+    "Pou5f1": {
+        "chromosome": "chr17",
+        "start": 35509945,
+        "end": 35514747,
+        "strand": "+",
+        "biotype": "protein_coding",
+    },
+    "Sox2": {
+        "chromosome": "chr3",
+        "start": 34650840,
+        "end": 34652882,
+        "strand": "-",
+        "biotype": "protein_coding",
+    },
+}

@@ -1,8 +1,16 @@
-# utils/oligostan_core.py - Modified Oligostan Core (No FLAP sequences)
+# utils/oligostan_core.py - Modified Oligostan Core with Complete PNAS Calculations
 
 import numpy as np
 from .thermodynamics import dg_calc_rna_37, dg37_score_calc
-from .filters import is_ok_4_pnas_filter, is_ok_4_gc_filter
+from .filters import (
+    is_ok_4_pnas_filter,
+    is_ok_4_gc_filter,
+    is_it_ok_4_a_comp,
+    is_it_ok_4_a_stack,
+    is_it_ok_4_c_comp,
+    is_it_ok_4_c_stack,
+    is_it_ok_4_c_spec_stack,
+)
 from .sequence_utils import determine_region_type
 
 
@@ -173,7 +181,7 @@ def design_fish_probes(gene_data, config):
         processed_probes = []
 
         for probe in raw_probes:
-            # Calculate genomic coordinates
+            # Calculate genomic coordinates (mm10)
             if gene_data["strand"] == 1:  # Forward strand
                 genomic_start = gene_data["genomic_start"] + probe["position"] - 1
                 genomic_end = genomic_start + probe["size"] - 1
@@ -193,11 +201,16 @@ def design_fish_probes(gene_data, config):
                 gene_data["intron_regions"],
             )
 
+            # Calculate thermodynamic properties
+            actual_dg37 = dg_calc_rna_37(
+                probe["sequence"], probe_length=len(probe["sequence"])
+            )[0]
+
             # Calculate quality metrics
             gc_count = probe["sequence"].count("G") + probe["sequence"].count("C")
             gc_percentage = gc_count / len(probe["sequence"])
 
-            # Apply filters
+            # Apply quality filters
             gc_filter = is_ok_4_gc_filter(
                 probe["sequence"], config["gc_content_min"], config["gc_content_max"]
             )
@@ -205,40 +218,65 @@ def design_fish_probes(gene_data, config):
                 probe["sequence"], config["pnas_filter_rules"]
             )
 
-            # Create probe record
+            # FIXED: Apply individual PNAS filters (these were missing!)
+            a_comp_pass = 1 if is_it_ok_4_a_comp(probe["sequence"]) else 0
+            a_stack_pass = 1 if is_it_ok_4_a_stack(probe["sequence"]) else 0
+            c_comp_pass = 1 if is_it_ok_4_c_comp(probe["sequence"]) else 0
+            c_stack_pass = 1 if is_it_ok_4_c_stack(probe["sequence"]) else 0
+            c_spec_pass = 1 if is_it_ok_4_c_spec_stack(probe["sequence"]) else 0
+
+            # FIXED: Calculate PNAS sum (this was missing!)
+            nb_of_pnas = (
+                a_comp_pass + a_stack_pass + c_comp_pass + c_stack_pass + c_spec_pass
+            )
+
+            # Create probe record with ALL required fields
             probe_record = {
                 # Gene information
                 "GeneName": gene_data["gene_name"],
-                "Species": config["species"],
+                "Species": "mouse",  # FIXED: Hardcoded since we only support mm10
                 "Chromosome": gene_data["chromosome"],
                 "RegionType": region_type,  # 'exon', 'intron', or 'exon-intron'
-                # Probe sequence and position
+                # Probe sequence and position (mm10 coordinates)
                 "Seq": probe["sequence"],
                 "ProbeSize": probe["size"],
-                "theStartPos": genomic_start,
-                "theEndPos": genomic_end,
+                "theStartPos": genomic_start,  # mm10 genomic coordinates
+                "theEndPos": genomic_end,  # mm10 genomic coordinates
                 # Strand information (CRITICAL for RT coverage)
                 "Target_Strand": target_strand,  # Gene's RNA strand
                 "Probe_Strand": probe_strand,  # Probe's strand (opposite)
                 # Thermodynamic properties
                 "dGOpt": desired_dg,
                 "dGScore": probe["score"],
-                "dG37": dg_calc_rna_37(
-                    probe["sequence"], probe_length=len(probe["sequence"])
-                )[0],
+                "dG37": actual_dg37,
                 # Quality metrics
                 "GCpc": gc_percentage,
                 "GCFilter": 1 if gc_filter else 0,
                 "PNASFilter": 1 if pnas_filter else 0,
-                # Placeholders for later analysis
+                # FIXED: Individual PNAS filter results (these were missing!)
+                "aCompFilter": a_comp_pass,
+                "aStackFilter": a_stack_pass,
+                "cCompFilter": c_comp_pass,
+                "cStackFilter": c_stack_pass,
+                "cSpecStackFilter": c_spec_pass,
+                "NbOfPNAS": nb_of_pnas,  # FIXED: This was the main missing field!
+                # Placeholders for later analysis (these will be filled by other modules)
                 "SNPs_Covered_Count": 0,
                 "SNPs_Covered_Positions": "",
+                "SNPs_Covered_Types": "",
                 "RT_Coverage_Start": 0,
                 "RT_Coverage_End": 0,
-                "RTBC_5Prime_Sequence": "",  # Will be added later
+                "RT_Coverage_Strand": ".",
+                "RTBC_5Prime_Sequence": "",  # Will be added by output generator
                 "NumberOfHits": 0,  # BLAST results
                 "PercentAlignment": 0,  # BLAST results
                 "UniqueHitName": "",  # BLAST results
+                "BLAST_Start": 0,  # BLAST results
+                "BLAST_End": 0,  # BLAST results
+                # Additional fields for compatibility
+                "InsideUTR": 0,  # Default value (not used in current analysis)
+                "MaskedFilter": 1,  # Default pass (dustmasker not enabled by default)
+                "RepeatMaskerPC": 0.0,  # Default no masking
             }
 
             processed_probes.append(probe_record)
