@@ -132,7 +132,7 @@ def main():
 
     # Show stringent filtering configuration
     console.print(f"\n[bold]Stringent Filtering Configuration:[/bold]")
-    console.print(f"  PNAS rules: {config['pnas_filter_rules']} (all 5 rules)")
+    console.print(f"  PNAS rules: {config['pnas_filter_rules']}")
     console.print(
         f"  Dustmasker: {'✅ Enabled' if config['use_dustmasker'] else '❌ Disabled'}"
     )

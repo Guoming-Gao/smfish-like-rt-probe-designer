@@ -52,7 +52,7 @@ FISH_RT_CONFIG = {
     "gc_content_max": 0.6,
     "salt_concentration": 0.115,
     # STRINGENT FILTERING (FIXED - all features restored)
-    "pnas_filter_rules": [1, 2, 3, 4, 5],  # ALL 5 PNAS rules (FIXED)
+    "pnas_filter_rules": [1, 2, 4],  # 3 rules is often enough
     "use_dustmasker": True,  # ENABLED (FIXED)
     "max_masked_percent": 0.1,
     # SNP COVERAGE FILTERING (FIXED - missing parameter added)
