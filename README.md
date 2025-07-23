@@ -33,9 +33,9 @@ Run with custom gene list from config\
 - **Thermodynamic Optimization**: Proven Oligostan algorithm (dG37 = -32.0)
 - **Strand-Aware Coverage**: Precise 100nt downstream RT coverage calculation
 - **SNP Analysis**: Coverage profiling for allelic expression studies
-- **BLAST Filtering**: Remove non-specific probes automatically
+- **Stringent PNAS+#SNP Filtering**: Keep only high-quality probes for BLAST verification later
 - **Batch Processing**: Process multiple genes efficiently
-- **Comprehensive Output**: Consolidated CSV with all metrics
+- **Comprehensive Output**: Consolidated CSV and fastfa files with all metrics
 
 ## Configuration
 
