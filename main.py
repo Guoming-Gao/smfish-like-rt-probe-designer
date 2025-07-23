@@ -25,8 +25,8 @@ def setup_output_directory(output_path):
     output_path.mkdir(parents=True, exist_ok=True)
 
     (output_path / "gene_sequences").mkdir(exist_ok=True)
-    (output_path / "snp_analysis").mkdir(exist_ok=True)
-    (output_path / "fasta_for_blast").mkdir(exist_ok=True)
+    # (output_path / "snp_analysis").mkdir(exist_ok=True)
+    # (output_path / "fasta_for_blast").mkdir(exist_ok=True)
 
     return output_path
 
