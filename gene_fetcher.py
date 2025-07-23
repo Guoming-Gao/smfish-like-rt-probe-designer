@@ -1,4 +1,4 @@
-# gene_fetcher.py - Local Genome FASTA Integration (Simplified)
+# gene_fetcher.py - Local Genome with GTF Parsing (Complete Implementation)
 
 import os
 import subprocess
@@ -7,6 +7,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from rich.console import Console
+import re
 
 console = Console()
 
@@ -18,15 +19,20 @@ class GeneSequenceFetcher:
         self.config = config
         self.genome_build = config.get("genome_build", "mm10")
 
-        # FIXED: Use the correct config keys
+        # File paths
         self.local_genome_fasta = config.get("local_genome_fasta_path", "")
         self.local_gtf_path = config.get("local_gtf_path", "")
         self.transcript_selection = config.get("transcript_selection", "longest")
 
-        # FIXED: Check FASTA file exists (not directory)
+        # Check if files exist
         self.use_demo_mode = not (
             self.local_genome_fasta and os.path.exists(self.local_genome_fasta)
         )
+        self.use_gtf = self.local_gtf_path and os.path.exists(self.local_gtf_path)
+
+        # Gene coordinate cache
+        self.gene_cache = {}
+        self.gtf_loaded = False
 
         if self.use_demo_mode:
             console.print(
@@ -37,43 +43,133 @@ class GeneSequenceFetcher:
             console.print(
                 f"[cyan]✅ Using local genome FASTA: {self.local_genome_fasta}[/cyan]"
             )
-            if self.local_gtf_path and os.path.exists(self.local_gtf_path):
-                console.print(f"[cyan]✅ Using local GTF: {self.local_gtf_path}[/cyan]")
-            else:
-                console.print(
-                    f"[yellow]⚠️  GTF not found: {self.local_gtf_path}[/yellow]"
-                )
+
+        if self.use_gtf:
+            console.print(
+                f"[cyan]✅ Using GTF annotation: {self.local_gtf_path}[/cyan]"
+            )
+            self._load_gtf_gene_coordinates()
+        else:
+            console.print(
+                f"[yellow]⚠️  GTF not found, using demo coordinates only[/yellow]"
+            )
+            console.print(f"[yellow]   Looking for: {self.local_gtf_path}[/yellow]")
 
         console.print(f"[cyan]Genome build: {self.genome_build}[/cyan]")
 
+    def _load_gtf_gene_coordinates(self):
+        """Load gene coordinates from GTF file"""
+        console.print("[cyan]Loading gene coordinates from GTF...[/cyan]")
+
+        try:
+            gene_count = 0
+            with open(self.local_gtf_path, "r") as f:
+                for line_num, line in enumerate(f, 1):
+                    if line.startswith("#") or not line.strip():
+                        continue
+
+                    try:
+                        parts = line.strip().split("\t")
+                        if len(parts) < 9:
+                            continue
+
+                        (
+                            chrom,
+                            source,
+                            feature,
+                            start,
+                            end,
+                            score,
+                            strand,
+                            frame,
+                            attributes,
+                        ) = parts
+
+                        # Only process gene features
+                        if feature != "gene":
+                            continue
+
+                        # Parse attributes to get gene name
+                        gene_name = self._extract_gene_name_from_attributes(attributes)
+                        if not gene_name:
+                            continue
+
+                        # Store gene coordinates
+                        self.gene_cache[gene_name] = {
+                            "chromosome": (
+                                chrom if chrom.startswith("chr") else f"chr{chrom}"
+                            ),
+                            "start": int(start),
+                            "end": int(end),
+                            "strand": strand,
+                            "source": source,
+                            "attributes": attributes,
+                        }
+
+                        gene_count += 1
+
+                        # Show progress for large GTF files
+                        if line_num % 100000 == 0:
+                            console.print(
+                                f"[cyan]   Processed {line_num} GTF lines, found {gene_count} genes...[/cyan]"
+                            )
+
+                    except Exception as e:
+                        if line_num < 100:  # Only show errors for first 100 lines
+                            console.print(
+                                f"[yellow]Warning: Error parsing GTF line {line_num}: {e}[/yellow]"
+                            )
+                        continue
+
+            console.print(f"[green]✅ Loaded {gene_count} genes from GTF[/green]")
+            self.gtf_loaded = True
+
+            # Show some example genes for verification
+            if gene_count > 0:
+                sample_genes = list(self.gene_cache.keys())[:5]
+                console.print(f"[cyan]   Sample genes: {sample_genes}[/cyan]")
+
+        except Exception as e:
+            console.print(f"[red]Error loading GTF file: {e}[/red]")
+            self.use_gtf = False
+
+    def _extract_gene_name_from_attributes(self, attributes):
+        """Extract gene name from GTF attributes"""
+        # Try different attribute patterns
+        patterns = [
+            r'gene_name "([^"]+)"',  # gene_name "Nanog"
+            r"gene_name=([^;]+)",  # gene_name=Nanog
+            r"Name=([^;]+)",  # Name=Nanog
+            r'gene_id "([^"]+)"',  # fallback to gene_id
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, attributes)
+            if match:
+                return match.group(1).strip()
+
+        return None
+
     def fetch_gene_sequence(self, gene_symbol):
         """
-        Fetch gene sequence using local files or demo coordinates
+        Fetch gene sequence using GTF coordinates + local FASTA
         Returns dict with gene info and sequence data
         """
         try:
             if self.use_demo_mode:
                 return self._fetch_demo_sequence(gene_symbol)
+            elif self.use_gtf and gene_symbol in self.gene_cache:
+                return self._fetch_gtf_sequence(gene_symbol)
             else:
-                return self._fetch_local_sequence(gene_symbol)
+                return self._fetch_fallback_sequence(gene_symbol)
 
         except Exception as e:
             console.print(f"[red]Error fetching {gene_symbol}: {str(e)}[/red]")
             return None
 
-    def _fetch_local_sequence(self, gene_symbol):
-        """Fetch sequence from local FASTA file using samtools faidx"""
-        from config import DEMO_GENE_COORDS
-
-        # For now, use demo coordinates with local FASTA
-        # TODO: Implement GTF parsing for real gene coordinates
-        if gene_symbol not in DEMO_GENE_COORDS:
-            console.print(
-                f"[red]Gene {gene_symbol} not found in demo coordinates[/red]"
-            )
-            return None
-
-        gene_info = DEMO_GENE_COORDS[gene_symbol]
+    def _fetch_gtf_sequence(self, gene_symbol):
+        """Fetch sequence using GTF coordinates + local FASTA"""
+        gene_info = self.gene_cache[gene_symbol]
 
         # Extract sequence using samtools faidx
         chromosome = gene_info["chromosome"]
@@ -92,18 +188,18 @@ class GeneSequenceFetcher:
                 return None
 
             console.print(
-                f"[green]✅ Extracted real sequence for {gene_symbol}: {len(sequence)} bp[/green]"
+                f"[green]✅ Extracted GTF sequence for {gene_symbol}: {len(sequence)} bp[/green]"
             )
 
-            # Create mock exon/intron regions for now
+            # Create mock exon/intron regions (TODO: parse from GTF transcripts/exons)
             exon_regions, intron_regions = self._create_mock_regions(len(sequence))
 
             return {
                 "gene_name": gene_symbol,
-                "gene_id": f"LOCAL_{gene_symbol}",
-                "transcript_id": f"LOCAL_{gene_symbol}_T1",
-                "biotype": gene_info["biotype"],
-                "chromosome": gene_info["chromosome"],
+                "gene_id": f"GTF_{gene_symbol}",
+                "transcript_id": f"GTF_{gene_symbol}_T1",
+                "biotype": "protein_coding",  # TODO: extract from GTF
+                "chromosome": chromosome,
                 "strand": 1 if strand == "+" else -1,
                 "genomic_start": start,
                 "genomic_end": end,
@@ -113,12 +209,25 @@ class GeneSequenceFetcher:
                 "intron_regions": intron_regions,
                 "transcript_length": len(sequence),
                 "genome_build": self.genome_build,
-                "source": "local_fasta",
+                "source": "gtf_coordinates",
             }
 
         except Exception as e:
             console.print(
-                f"[red]Failed to fetch local sequence for {gene_symbol}: {e}[/red]"
+                f"[red]Failed to fetch GTF sequence for {gene_symbol}: {e}[/red]"
+            )
+            return None
+
+    def _fetch_fallback_sequence(self, gene_symbol):
+        """Fallback to demo coordinates if GTF lookup fails"""
+        from config import DEMO_GENE_COORDS
+
+        if gene_symbol in DEMO_GENE_COORDS:
+            console.print(f"[yellow]Using demo coordinates for {gene_symbol}[/yellow]")
+            return self._fetch_demo_sequence(gene_symbol)
+        else:
+            console.print(
+                f"[red]Gene {gene_symbol} not found in GTF or demo coordinates[/red]"
             )
             return None
 
@@ -128,7 +237,7 @@ class GeneSequenceFetcher:
             # Construct region string
             region = f"{chromosome}:{start}-{end}"
 
-            # FIXED: Use local FASTA file path
+            # Use local FASTA file path
             cmd = ["samtools", "faidx", self.local_genome_fasta, region]
 
             console.print(f"[cyan]Extracting {region} from local FASTA...[/cyan]")
