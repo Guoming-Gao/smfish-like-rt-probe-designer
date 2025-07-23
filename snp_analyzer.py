@@ -1,4 +1,4 @@
-# snp_analyzer.py - SNP Coverage Analysis with Coordinate Conversion
+# snp_analyzer.py - SNP Coverage Analysis (Local Files Only)
 
 import pandas as pd
 import numpy as np
@@ -9,35 +9,35 @@ console = Console()
 
 
 class SNPCoverageAnalyzer:
-    """Analyze SNP coverage in RT region with coordinate conversion (gene-focused)"""
+    """Analyze SNP coverage using local B6xCast SNP file"""
 
     def __init__(self, config):
         self.config = config
         self.rt_coverage_length = config.get("rt_coverage_downstream", 100)
         self.snp_file_path = config.get("snp_file_path", "")
 
-        # Load SNP database (single file)
+        # Load SNP database
         self.snp_database = {}
         self.load_snp_database()
 
     def load_snp_database(self):
-        """Load SNP database from single B6xCast file"""
+        """Load B6xCast SNP file"""
         if not self.snp_file_path or not Path(self.snp_file_path).exists():
             console.print(f"[red]SNP file not found: {self.snp_file_path}[/red]")
             return
 
         try:
             snps = self._parse_snp_file(self.snp_file_path)
-            console.print(f"✅ Loaded {len(snps)} B6xCast SNPs from mm10 coordinates")
+            console.print(f"✅ Loaded {len(snps)} B6xCast SNPs")
 
-            # Organize by chromosome for efficient lookup
+            # Organize by chromosome
             for snp in snps:
                 chr_name = snp["chromosome"]
                 if chr_name not in self.snp_database:
                     self.snp_database[chr_name] = []
                 self.snp_database[chr_name].append(snp)
 
-            # Sort SNPs by position for efficient searching
+            # Sort by position
             for chr_name in self.snp_database:
                 self.snp_database[chr_name].sort(key=lambda x: x["start"])
 
@@ -48,7 +48,7 @@ class SNPCoverageAnalyzer:
             self.snp_database = {}
 
     def _parse_snp_file(self, file_path):
-        """Parse SNP file with format: chr1 \t 3001490 \t 3001490 \t C/C,A/A"""
+        """Parse B6xCast SNP file"""
         snps = []
 
         try:
@@ -59,34 +59,27 @@ class SNPCoverageAnalyzer:
                         continue
 
                     try:
-                        # Format: chromosome \t start \t end \t genotype_info
                         tokens = line.split("\t")
                         if len(tokens) >= 4:
                             snps.append(
                                 {
-                                    "chromosome": tokens[0],  # chr1
-                                    "start": int(tokens[1]),  # 3001490
-                                    "end": int(tokens[2]),  # 3001490
-                                    "genotype": tokens[3],  # C/C,A/A (ignore for now)
+                                    "chromosome": tokens[0],
+                                    "start": int(tokens[1]),
+                                    "end": int(tokens[2]),
+                                    "genotype": tokens[3],
                                     "line_number": line_num,
                                 }
                             )
-                    except (ValueError, IndexError) as e:
-                        console.print(
-                            f"[yellow]Skipping malformed line {line_num}: {line}[/yellow]"
-                        )
+                    except (ValueError, IndexError):
                         continue
 
         except Exception as e:
-            console.print(f"[red]Error reading SNP file {file_path}: {str(e)}[/red]")
+            console.print(f"[red]Error reading SNP file: {e}[/red]")
 
         return snps
 
     def analyze_probes(self, probe_list):
-        """
-        Analyze SNP coverage for all probes
-        KEY: Only analyze SNPs within genes of interest
-        """
+        """Analyze SNP coverage for all probes"""
         if not self.snp_database:
             console.print(
                 "[yellow]No SNP database loaded, skipping SNP analysis[/yellow]"
@@ -99,22 +92,22 @@ class SNPCoverageAnalyzer:
 
         for probe in probe_list:
             try:
-                # Calculate RT coverage region in GENOMIC coordinates
-                rt_coverage_genomic = self._calculate_rt_coverage_genomic_coords(probe)
+                # Calculate RT coverage region in genomic coordinates
+                rt_coverage = self._calculate_rt_coverage_coords(probe)
 
-                # Find SNPs in RT coverage region (genomic coordinates)
-                covered_snps = self._find_snps_in_genomic_region(
-                    chromosome=rt_coverage_genomic["chromosome"],
-                    start=rt_coverage_genomic["start"],
-                    end=rt_coverage_genomic["end"],
+                # Find SNPs in RT region
+                covered_snps = self._find_snps_in_region(
+                    chromosome=rt_coverage["chromosome"],
+                    start=rt_coverage["start"],
+                    end=rt_coverage["end"],
                 )
 
                 # Update probe with SNP information
                 probe.update(
                     {
-                        "RT_Coverage_Start": rt_coverage_genomic["start"],
-                        "RT_Coverage_End": rt_coverage_genomic["end"],
-                        "RT_Coverage_Strand": rt_coverage_genomic["strand"],
+                        "RT_Coverage_Start": rt_coverage["start"],
+                        "RT_Coverage_End": rt_coverage["end"],
+                        "RT_Coverage_Strand": rt_coverage["strand"],
                         "SNPs_Covered_Count": len(covered_snps),
                         "SNPs_Covered_Positions": ",".join(
                             [f"{s['chromosome']}:{s['start']}" for s in covered_snps]
@@ -126,10 +119,7 @@ class SNPCoverageAnalyzer:
                 )
 
             except Exception as e:
-                console.print(
-                    f"[red]Error analyzing SNP coverage for probe {probe.get('Seq', 'unknown')}: {str(e)}[/red]"
-                )
-                # Set default values on error
+                console.print(f"[red]Error analyzing SNP coverage: {e}[/red]")
                 probe.update(
                     {
                         "RT_Coverage_Start": 0,
@@ -143,28 +133,19 @@ class SNPCoverageAnalyzer:
 
         return probe_list
 
-    def _calculate_rt_coverage_genomic_coords(self, probe):
-        """
-        Calculate RT coverage region in GENOMIC coordinates (mm10)
-        CRITICAL: Strand-aware and converts relative → genomic coordinates
-        """
-        # Probe positions are already in genomic coordinates from oligostan_core
-        target_strand = probe["Target_Strand"]  # Gene's RNA strand
-        probe_start_genomic = probe["theStartPos"]  # Already genomic coords
-        probe_end_genomic = probe["theEndPos"]  # Already genomic coords
+    def _calculate_rt_coverage_coords(self, probe):
+        """Calculate RT coverage region (strand-aware)"""
+        target_strand = probe["Target_Strand"]
+        probe_start = probe["theStartPos"]
+        probe_end = probe["theEndPos"]
         chromosome = probe["Chromosome"]
 
         if target_strand == "+":
-            # RNA goes 5' → 3' in + direction
-            # RT coverage is downstream (towards higher coordinates)
-            rt_start = probe_end_genomic + 1  # Start after probe ends
+            rt_start = probe_end + 1
             rt_end = rt_start + self.rt_coverage_length - 1
             rt_strand = "+"
-
-        else:  # target_strand == '-'
-            # RNA goes 5' → 3' in - direction
-            # RT coverage is downstream (towards lower coordinates)
-            rt_end = probe_start_genomic - 1  # End before probe starts
+        else:
+            rt_end = probe_start - 1
             rt_start = rt_end - self.rt_coverage_length + 1
             rt_strand = "-"
 
@@ -173,20 +154,20 @@ class SNPCoverageAnalyzer:
             "start": rt_start,
             "end": rt_end,
             "strand": rt_strand,
-            "length": self.rt_coverage_length,
         }
 
-    def _find_snps_in_genomic_region(self, chromosome, start, end):
-        """Find all SNPs that overlap with the genomic region"""
-        if chromosome not in self.snp_database:
-            return []
+    def _find_snps_in_region(self, chromosome, start, end):
+        """Find SNPs overlapping with region"""
+        # Handle chromosome naming (with or without 'chr' prefix)
+        chr_variants = [chromosome, f"chr{chromosome}", chromosome.replace("chr", "")]
 
-        chr_snps = self.snp_database[chromosome]
         overlapping_snps = []
-
-        for snp in chr_snps:
-            # Check if SNP overlaps with RT coverage region
-            if snp["start"] <= end and snp["end"] >= start:
-                overlapping_snps.append(snp)
+        for chr_name in chr_variants:
+            if chr_name in self.snp_database:
+                chr_snps = self.snp_database[chr_name]
+                for snp in chr_snps:
+                    if snp["start"] <= end and snp["end"] >= start:
+                        overlapping_snps.append(snp)
+                break  # Found the right chromosome format
 
         return overlapping_snps

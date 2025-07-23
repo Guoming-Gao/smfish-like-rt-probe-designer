@@ -1,5 +1,9 @@
-# config.py - SIMPLIFIED (No BLAST, No Redundant Folders)
+# config.py - smfish-like-rt-probe-designer Configuration (Local Files + Stringent Filtering)
 import os
+
+# =============================================================================
+# MAIN CONFIGURATION (LOCAL FILES + STRINGENT FILTERING)
+# =============================================================================
 
 FISH_RT_CONFIG = {
     # INPUT SETTINGS
@@ -28,12 +32,11 @@ FISH_RT_CONFIG = {
     ],
     "transcript_selection": "longest",
     "output_directory": "/Users/gmgao/Dropbox/Caltech_PostDoc_GuttmanLab/constructs_and_smiFISH/smFISH_like_focusedRT-XCI",
-    # LOCAL FILE PATHS (Simplified - direct paths)
-    "genome_build": "mm10",
-    "local_gtf_path": "/Volumes/guttman-1/annotations/mm10/Mus_musculus.GRCm38.96.gtf",
-    "local_genome_fasta_path": "/Volumes/guttman-1/genomes/mm10/mm10withchr.fa",
+    # LOCAL FILE PATHS (YOUR SERVER FILES)
+    "local_gtf_path": "/Volumes/guttman-1/annotations/mm10/Mus_musculus.GRCm38.96.sorted.gtf",
+    "local_genome_fasta_path": "/Volumes/guttman-1/genomes/mm10/GRCm38_68.fa",
     "snp_file_path": "/Volumes/guttman-1/data/snps/Bl6xCast.mm10.snps",
-    # RT COVERAGE SETTINGS
+    # RT COVERAGE SETTINGS (UNCHANGED as requested)
     "rt_coverage_downstream": 100,  # nt downstream in RNA 5'→3' direction
     "include_probe_in_coverage": False,  # Strictly downstream
     # RTBC BARCODE SETTINGS
@@ -47,12 +50,16 @@ FISH_RT_CONFIG = {
     "probe_spacing_min": 2,
     "gc_content_min": 0.4,
     "gc_content_max": 0.6,
-    "pnas_filter_rules": [1, 2, 4],
     "salt_concentration": 0.115,
-    # OPTIONAL FILTERS
-    "use_dustmasker": False,
+    # STRINGENT FILTERING (FIXED - all features restored)
+    "pnas_filter_rules": [1, 2, 3, 4, 5],  # ALL 5 PNAS rules (FIXED)
+    "use_dustmasker": True,  # ENABLED (FIXED)
     "max_masked_percent": 0.1,
-    # FASTA OUTPUT SETTINGS (NEW)
+    # SNP COVERAGE FILTERING (FIXED - missing parameter added)
+    "min_snp_coverage_for_final": 2,  # FIXED: Minimum SNPs for final output
+    "generate_all_probes_file": False,  # FIXED: Skip ALL.csv generation
+    "focus_on_high_quality_only": True,  # FIXED: Only process filtered probes
+    # FASTA OUTPUT SETTINGS
     "generate_blast_fasta": True,  # Generate FASTA for manual BLAST
     "fasta_description_format": "detailed",  # 'simple' or 'detailed'
 }
@@ -81,7 +88,7 @@ DG37_VALUES = {
 }
 
 # =============================================================================
-# TEST GENE SETS (unchanged)
+# TEST GENE SETS (unchanged as requested)
 # =============================================================================
 
 TEST_GENES_21 = [
@@ -111,29 +118,29 @@ TEST_GENES_21 = [
 TEST_GENES_SMALL = ["Nanog", "Pou5f1", "Sox2"]
 
 # =============================================================================
-# DEMO GENE COORDINATES (unchanged)
+# DEMO GENE COORDINATES (mm10) - For when local files aren't accessible
 # =============================================================================
 
 DEMO_GENE_COORDS = {
     "Nanog": {
-        "chromosome": "chr6",
+        "chromosome": "6",
         "start": 122707489,
         "end": 122714633,
-        "strand": "+",
+        "strand": 1,
         "biotype": "protein_coding",
     },
     "Pou5f1": {
-        "chromosome": "chr17",
-        "start": 35509945,
-        "end": 35514747,
-        "strand": "+",
+        "chromosome": "17",
+        "start": 35506018,
+        "end": 35510772,
+        "strand": 1,
         "biotype": "protein_coding",
     },
     "Sox2": {
-        "chromosome": "chr3",
+        "chromosome": "3",
         "start": 34650840,
         "end": 34652882,
-        "strand": "-",
+        "strand": -1,
         "biotype": "protein_coding",
     },
 }
