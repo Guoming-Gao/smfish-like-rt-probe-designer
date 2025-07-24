@@ -251,41 +251,36 @@ class GeneSequenceFetcher:
 
     def _extract_sequence_samtools(self, chromosome, start, end, strand):
         """
-        FIXED: Extract gene sequence using samtools faidx (strand-aware)
+        FIXED: Extract sequences in RNA 5'→3' orientation for all genes
 
-        For + strand genes: genomic DNA = gene sequence
-        For - strand genes: reverse complement of genomic DNA = gene sequence
+        Both + and - strand genes should provide RNA sense sequence
         """
         try:
             region = f"{chromosome}:{start}-{end}"
             cmd = ["samtools", "faidx", self.genome_fasta_path, region]
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
-            # Parse FASTA output
             lines = result.stdout.strip().split("\n")
             if len(lines) < 2:
                 return None
 
             genomic_sequence = "".join(lines[1:]).upper()
 
-            # FIXED: Convert to gene sequence based on strand
+            # FIXED: Always provide RNA sense sequence (5'→3' direction)
             if strand == 1:  # + strand gene
-                gene_sequence = genomic_sequence  # Genomic DNA IS the gene sequence
+                # For + strand genes: genomic DNA IS the RNA sense sequence
+                rna_sense_sequence = genomic_sequence
             else:  # - strand gene
-                # Need reverse complement of genomic DNA to get gene sequence
-                gene_sequence = str(Seq(genomic_sequence).reverse_complement())
+                # For - strand genes: reverse complement gives RNA sense sequence
+                rna_sense_sequence = str(Seq(genomic_sequence).reverse_complement())
 
-            console.print(
-                f"[green]Extracted gene sequence {len(gene_sequence)} bp for {region} (strand: {strand})[/green]"
-            )
-            return gene_sequence
+            console.print(f"[green]Extracted RNA sense sequence {len(rna_sense_sequence)} bp for {region} (strand: {strand})[/green]")
+            return rna_sense_sequence
 
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]samtools error: {e.stderr}[/red]")
-            return None
         except Exception as e:
             console.print(f"[red]Sequence extraction error: {e}[/red]")
             return None
+
 
     def _select_transcript(self, transcripts):
         """Select transcript based on strategy"""

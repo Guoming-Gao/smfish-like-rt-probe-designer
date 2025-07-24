@@ -1,6 +1,7 @@
-# utils/oligostan_core.py - Modified Oligostan Core (No BLAST placeholders)
+# utils/oligostan_core.py - FIXED: Correct probe sequence assignment
 
 import numpy as np
+from Bio.Seq import Seq  # ADD THIS IMPORT
 from .thermodynamics import dg_calc_rna_37, dg37_score_calc
 from .filters import (
     is_ok_4_pnas_filter,
@@ -13,17 +14,14 @@ from .filters import (
 )
 from .sequence_utils import determine_region_type
 
-
 def which_max_r(x):
     """Exact translation of R's WhichMax function"""
     max_val = np.max(x)
     max_indices = np.where(x == max_val)[0]
-
     if len(max_indices) >= 2:
         return [0, max_val]  # Return 0 for ties (R behavior)
     else:
         return [max_indices[0] + 1, max_val]  # Return 1-based index
-
 
 def get_probes_from_sequence(
     seq,
@@ -58,6 +56,7 @@ def get_probes_from_sequence(
 
         for col_idx, column in enumerate(all_columns):
             the_tms_matrix[: len(column), col_idx] = column
+
     else:
         the_tms_matrix = np.array(the_tms_tmp).reshape(-1, 1)
 
@@ -108,7 +107,6 @@ def get_probes_from_sequence(
     # Apply spacing constraint
     return apply_spacing_constraint(validated_scores, seq, inc_betw_prob)
 
-
 def apply_spacing_constraint(validated_scores, seq, min_spacing):
     """Apply minimum spacing between probes"""
     if len(validated_scores.shape) == 1:
@@ -130,16 +128,18 @@ def apply_spacing_constraint(validated_scores, seq, min_spacing):
             score = valid_tmp[0, 1]
             position = int(valid_tmp[0, 2])
 
-            # Extract probe sequence
-            probe_seq = seq[position - 1 : position - 1 + probe_size].upper()
+            # FIXED: Extract target sequence, then calculate probe sequence
+            target_seq = seq[position - 1 : position - 1 + probe_size].upper()
+            probe_seq = str(Seq(target_seq).reverse_complement())  # ACTUAL PROBE SEQUENCE
 
             the_probes.append(
                 {
                     "size": probe_size,
                     "score": score,
                     "position": position,
-                    "sequence": probe_seq,
-                    "genomic_start": position,  # Will be adjusted later
+                    "target_sequence": target_seq,      # NEW: target region
+                    "probe_sequence": probe_seq,        # NEW: actual probe
+                    "genomic_start": position,          # Will be adjusted later
                     "genomic_end": position + probe_size - 1,
                 }
             )
@@ -149,7 +149,6 @@ def apply_spacing_constraint(validated_scores, seq, min_spacing):
             break
 
     return the_probes
-
 
 def design_fish_probes(gene_data, config):
     """
@@ -201,58 +200,69 @@ def design_fish_probes(gene_data, config):
                 gene_data["intron_regions"],
             )
 
-            # Calculate thermodynamic properties
+            # FIXED: Use the actual probe sequence for thermodynamic calculations
+            probe_sequence = probe["probe_sequence"]  # This is the reverse complement
+            target_sequence = probe["target_sequence"]  # This is the gene region
+
+            # Calculate thermodynamic properties using PROBE sequence
             actual_dg37 = dg_calc_rna_37(
-                probe["sequence"], probe_length=len(probe["sequence"])
+                probe_sequence, probe_length=len(probe_sequence)
             )[0]
 
-            # Calculate quality metrics
-            gc_count = probe["sequence"].count("G") + probe["sequence"].count("C")
-            gc_percentage = gc_count / len(probe["sequence"])
+            # Calculate quality metrics using PROBE sequence
+            gc_count = probe_sequence.count("G") + probe_sequence.count("C")
+            gc_percentage = gc_count / len(probe_sequence)
 
-            # Apply quality filters
+            # Apply quality filters using PROBE sequence
             gc_filter = is_ok_4_gc_filter(
-                probe["sequence"], config["gc_content_min"], config["gc_content_max"]
-            )
-            pnas_filter = is_ok_4_pnas_filter(
-                probe["sequence"], config["pnas_filter_rules"]
+                probe_sequence, config["gc_content_min"], config["gc_content_max"]
             )
 
-            # Apply individual PNAS filters
-            a_comp_pass = 1 if is_it_ok_4_a_comp(probe["sequence"]) else 0
-            a_stack_pass = 1 if is_it_ok_4_a_stack(probe["sequence"]) else 0
-            c_comp_pass = 1 if is_it_ok_4_c_comp(probe["sequence"]) else 0
-            c_stack_pass = 1 if is_it_ok_4_c_stack(probe["sequence"]) else 0
-            c_spec_pass = 1 if is_it_ok_4_c_spec_stack(probe["sequence"]) else 0
+            pnas_filter = is_ok_4_pnas_filter(
+                probe_sequence, config["pnas_filter_rules"]
+            )
+
+            # Apply individual PNAS filters using PROBE sequence
+            a_comp_pass = 1 if is_it_ok_4_a_comp(probe_sequence) else 0
+            a_stack_pass = 1 if is_it_ok_4_a_stack(probe_sequence) else 0
+            c_comp_pass = 1 if is_it_ok_4_c_comp(probe_sequence) else 0
+            c_stack_pass = 1 if is_it_ok_4_c_stack(probe_sequence) else 0
+            c_spec_pass = 1 if is_it_ok_4_c_spec_stack(probe_sequence) else 0
 
             # Calculate PNAS sum
             nb_of_pnas = (
                 a_comp_pass + a_stack_pass + c_comp_pass + c_stack_pass + c_spec_pass
             )
 
-            # Create probe record with ALL required fields (NO BLAST placeholders)
+            # Create probe record with ALL required fields
             probe_record = {
                 # Gene information
                 "GeneName": gene_data["gene_name"],
                 "Species": "mouse",
                 "Chromosome": gene_data["chromosome"],
                 "RegionType": region_type,  # 'exon', 'intron', or 'exon-intron'
-                # Probe sequence and position (mm10 coordinates)
-                "Seq": probe["sequence"],
+
+                # FIXED: Proper sequence assignment
+                "Seq": probe_sequence,              # ACTUAL PROBE SEQUENCE (reverse complement)
+                "Target_Seq": target_sequence,      # TARGET REGION (for reference/SNP analysis)
                 "ProbeSize": probe["size"],
-                "theStartPos": genomic_start,  # mm10 genomic coordinates
-                "theEndPos": genomic_end,  # mm10 genomic coordinates
+                "theStartPos": genomic_start,       # mm10 genomic coordinates
+                "theEndPos": genomic_end,           # mm10 genomic coordinates
+
                 # Strand information (CRITICAL for RT coverage)
-                "Target_Strand": target_strand,  # Gene's RNA strand
-                "Probe_Strand": probe_strand,  # Probe's strand (opposite)
+                "Target_Strand": target_strand,     # Gene's RNA strand
+                "Probe_Strand": probe_strand,       # Probe's strand (opposite)
+
                 # Thermodynamic properties
                 "dGOpt": desired_dg,
                 "dGScore": probe["score"],
                 "dG37": actual_dg37,
+
                 # Quality metrics
                 "GCpc": gc_percentage,
                 "GCFilter": 1 if gc_filter else 0,
                 "PNASFilter": 1 if pnas_filter else 0,
+
                 # Individual PNAS filter results
                 "aCompFilter": a_comp_pass,
                 "aStackFilter": a_stack_pass,
@@ -260,6 +270,7 @@ def design_fish_probes(gene_data, config):
                 "cStackFilter": c_stack_pass,
                 "cSpecStackFilter": c_spec_pass,
                 "NbOfPNAS": nb_of_pnas,
+
                 # Placeholders for SNP analysis (will be filled by snp_analyzer)
                 "SNPs_Covered_Count": 0,
                 "SNPs_Covered_Positions": "",
@@ -268,6 +279,7 @@ def design_fish_probes(gene_data, config):
                 "RT_Coverage_End": 0,
                 "RT_Coverage_Strand": ".",
                 "RTBC_5Prime_Sequence": "",  # Will be added by output generator
+
                 # Additional fields for compatibility
                 "InsideUTR": 0,  # Default value
                 "MaskedFilter": 1,  # Default pass (dustmasker not enabled)
