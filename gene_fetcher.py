@@ -1,4 +1,4 @@
-# gene_fetcher.py - Local File Gene Fetcher (NO ENSEMBL API)
+# gene_fetcher.py - Local File Gene Fetcher (FIXED: Strand-aware sequence extraction)
 
 import pandas as pd
 import subprocess
@@ -30,22 +30,21 @@ class GeneSequenceFetcher:
 
         if self.use_local_files:
             console.print(f"[green]✅ Using local files:[/green]")
-            console.print(f"[cyan]  GTF: {self.gtf_path}[/cyan]")
-            console.print(f"[cyan]  FASTA: {self.genome_fasta_path}[/cyan]")
+            console.print(f"[cyan] GTF: {self.gtf_path}[/cyan]")
+            console.print(f"[cyan] FASTA: {self.genome_fasta_path}[/cyan]")
             # Load GTF data
             self.gene_cache = {}
             self._load_gtf_data()
         else:
             console.print(
-                f"[yellow]⚠️  Local files not accessible, using demo coordinates[/yellow]"
+                f"[yellow]⚠️ Local files not accessible, using demo coordinates[/yellow]"
             )
-            console.print(f"[yellow]  GTF: {self.gtf_path}[/yellow]")
-            console.print(f"[yellow]  FASTA: {self.genome_fasta_path}[/yellow]")
+            console.print(f"[yellow] GTF: {self.gtf_path}[/yellow]")
+            console.print(f"[yellow] FASTA: {self.genome_fasta_path}[/yellow]")
 
     def _load_gtf_data(self):
         """Load and parse GTF file"""
         console.print(f"[cyan]Loading GTF data...[/cyan]")
-
         try:
             genes = {}
             transcripts = {}
@@ -75,7 +74,6 @@ class GeneSequenceFetcher:
                     # Parse attributes
                     attr_dict = self._parse_gtf_attributes(attributes)
                     gene_name = attr_dict.get("gene_name", "").strip('"')
-
                     if not gene_name:
                         continue
 
@@ -96,7 +94,6 @@ class GeneSequenceFetcher:
                         if transcript_id and gene_name:
                             if gene_name not in transcripts:
                                 transcripts[gene_name] = []
-
                             transcripts[gene_name].append(
                                 {
                                     "transcript_id": transcript_id,
@@ -115,7 +112,6 @@ class GeneSequenceFetcher:
                                 exons[gene_name] = {}
                             if transcript_id not in exons[gene_name]:
                                 exons[gene_name][transcript_id] = []
-
                             exons[gene_name][transcript_id].append(
                                 {"start": int(start), "end": int(end)}
                             )
@@ -158,7 +154,6 @@ class GeneSequenceFetcher:
     def _fetch_from_local_files(self, gene_symbol):
         """Fetch from local GTF + FASTA files"""
         genes = self.gene_cache["genes"]
-
         if gene_symbol not in genes:
             console.print(f"[red]Gene {gene_symbol} not found in GTF[/red]")
             return None
@@ -174,18 +169,25 @@ class GeneSequenceFetcher:
         # Select transcript
         selected_transcript = self._select_transcript(transcripts)
 
-        # Extract genomic sequence using samtools
-        genomic_sequence = self._extract_sequence_samtools(
-            gene_info["chromosome"], gene_info["start"], gene_info["end"]
+        # FIXED: Extract gene sequence (strand-aware)
+        gene_sequence = self._extract_sequence_samtools(
+            gene_info["chromosome"],
+            gene_info["start"],
+            gene_info["end"],
+            gene_info["strand"],  # Pass strand information
         )
 
-        if not genomic_sequence:
+        if not gene_sequence:
             console.print(f"[red]Failed to extract sequence for {gene_symbol}[/red]")
             return None
 
         # Get exon/intron regions
         exon_intron_regions = self._get_exon_intron_regions(
             gene_symbol, selected_transcript, gene_info
+        )
+
+        console.print(
+            f"[green]✅ {gene_symbol}: {len(gene_sequence)} bp, strand {gene_info['strand']}[/green]"
         )
 
         return {
@@ -197,7 +199,7 @@ class GeneSequenceFetcher:
             "strand": gene_info["strand"],
             "genomic_start": gene_info["start"],
             "genomic_end": gene_info["end"],
-            "sequence": genomic_sequence,
+            "sequence": gene_sequence,
             "sequence_type": "genomic",
             "exon_regions": exon_intron_regions["exons"],
             "intron_regions": exon_intron_regions["introns"],
@@ -217,14 +219,16 @@ class GeneSequenceFetcher:
         gene_info = DEMO_GENE_COORDS[gene_symbol]
         sequence_length = gene_info["end"] - gene_info["start"] + 1
 
-        # Generate mock sequence
-        mock_sequence = self._generate_mock_sequence(sequence_length, gene_symbol)
+        # Generate mock sequence (strand-aware)
+        mock_sequence = self._generate_mock_sequence(
+            sequence_length, gene_symbol, gene_info["strand"]
+        )
 
         # Create mock regions
         exon_regions, intron_regions = self._create_mock_regions(sequence_length)
 
         console.print(
-            f"[yellow]Generated demo sequence for {gene_symbol}: {len(mock_sequence)} bp[/yellow]"
+            f"[yellow]Generated demo sequence for {gene_symbol}: {len(mock_sequence)} bp, strand {gene_info['strand']}[/yellow]"
         )
 
         return {
@@ -245,12 +249,16 @@ class GeneSequenceFetcher:
             "source": "demo_coordinates",
         }
 
-    def _extract_sequence_samtools(self, chromosome, start, end):
-        """Extract sequence using samtools faidx"""
+    def _extract_sequence_samtools(self, chromosome, start, end, strand):
+        """
+        FIXED: Extract gene sequence using samtools faidx (strand-aware)
+
+        For + strand genes: genomic DNA = gene sequence
+        For - strand genes: reverse complement of genomic DNA = gene sequence
+        """
         try:
             region = f"{chromosome}:{start}-{end}"
             cmd = ["samtools", "faidx", self.genome_fasta_path, region]
-
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
             # Parse FASTA output
@@ -258,10 +266,19 @@ class GeneSequenceFetcher:
             if len(lines) < 2:
                 return None
 
-            sequence = "".join(lines[1:]).upper()
-            console.print(f"[green]Extracted {len(sequence)} bp for {region}[/green]")
+            genomic_sequence = "".join(lines[1:]).upper()
 
-            return sequence
+            # FIXED: Convert to gene sequence based on strand
+            if strand == 1:  # + strand gene
+                gene_sequence = genomic_sequence  # Genomic DNA IS the gene sequence
+            else:  # - strand gene
+                # Need reverse complement of genomic DNA to get gene sequence
+                gene_sequence = str(Seq(genomic_sequence).reverse_complement())
+
+            console.print(
+                f"[green]Extracted gene sequence {len(gene_sequence)} bp for {region} (strand: {strand})[/green]"
+            )
+            return gene_sequence
 
         except subprocess.CalledProcessError as e:
             console.print(f"[red]samtools error: {e.stderr}[/red]")
@@ -294,7 +311,6 @@ class GeneSequenceFetcher:
         for exon in exon_data:
             rel_start = exon["start"] - gene_start
             rel_end = exon["end"] - gene_start
-
             exon_regions.append(
                 {
                     "start": rel_start,
@@ -312,7 +328,6 @@ class GeneSequenceFetcher:
             for i in range(len(exon_regions) - 1):
                 intron_start = exon_regions[i]["end"] + 1
                 intron_end = exon_regions[i + 1]["start"] - 1
-
                 if intron_end > intron_start:
                     intron_regions.append(
                         {
@@ -324,16 +339,21 @@ class GeneSequenceFetcher:
 
         return {"exons": exon_regions, "introns": intron_regions}
 
-    def _generate_mock_sequence(self, length, gene_symbol):
-        """Generate realistic mock sequence for demo"""
+    def _generate_mock_sequence(self, length, gene_symbol, strand):
+        """Generate realistic mock sequence for demo (strand-aware)"""
         import random
 
         random.seed(hash(gene_symbol) % 1000)
 
         bases = ["A", "T", "G", "C"]
         weights = [0.29, 0.29, 0.21, 0.21]  # ~42% GC
+        genomic_mock = "".join(random.choices(bases, weights=weights, k=length))
 
-        return "".join(random.choices(bases, weights=weights, k=length))
+        # Convert to gene sequence based on strand
+        if strand == 1:  # + strand
+            return genomic_mock
+        else:  # - strand
+            return str(Seq(genomic_mock).reverse_complement())
 
     def _create_mock_regions(self, sequence_length):
         """Create mock exon/intron regions"""
@@ -384,16 +404,18 @@ class GeneSequenceFetcher:
             try:
                 gene_name = gene_data["gene_name"]
                 sequence = gene_data["sequence"]
+                strand = gene_data["strand"]
 
+                # Add strand info to description
+                strand_symbol = "+" if strand == 1 else "-"
                 description = (
                     f"{gene_name} | {gene_data['biotype']} | "
                     f"chr{gene_data['chromosome']}:{gene_data['genomic_start']}-{gene_data['genomic_end']} | "
-                    f"strand:{gene_data['strand']} | genome:{gene_data['genome_build']} | "
+                    f"strand:{strand_symbol} | genome:{gene_data['genome_build']} | "
                     f"source:{gene_data['source']} | length:{len(sequence)}bp"
                 )
 
                 record = SeqRecord(Seq(sequence), id=gene_name, description=description)
-
                 output_file = output_dir / f"{gene_name}_mm10.fa"
                 SeqIO.write(record, output_file, "fasta")
 

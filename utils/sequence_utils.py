@@ -1,4 +1,4 @@
-# utils/sequence_utils.py - Updated with strand-aware utilities
+# utils/sequence_utils.py - FIXED: Removed automatic reverse complement
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -6,9 +6,13 @@ import os
 
 
 def read_fasta_sequences(file_path):
-    """Read FASTA sequences and return as list with reverse complement"""
-    sequences = []
+    """
+    FIXED: Read FASTA sequences without automatic reverse complement
 
+    Now respects the sequence orientation as saved by gene_fetcher.py
+    (which should already be the correct gene sequence)
+    """
+    sequences = []
     # Extract base filename without extension
     base_filename = os.path.splitext(os.path.basename(file_path))[0]
 
@@ -16,12 +20,11 @@ def read_fasta_sequences(file_path):
         # Use base filename instead of sequence header
         seq_id = base_filename
 
-        # Reverse complement to work from probe perspective (matching R script)
-        rev_comp_seq = str(record.seq.reverse_complement())
+        # FIXED: Use sequence as-is (should already be correct gene sequence)
+        # No more automatic reverse complement
+        sequence = str(record.seq)
 
-        sequences.append(
-            {"id": seq_id, "name": base_filename, "sequence": rev_comp_seq}
-        )
+        sequences.append({"id": seq_id, "name": base_filename, "sequence": sequence})
 
     return sequences
 
@@ -31,7 +34,6 @@ def determine_region_type(probe_start, probe_end, exon_regions, intron_regions):
     Determine if probe is in exon, intron, or spans both
     Returns: 'exon', 'intron', or 'exon-intron'
     """
-
     # Check overlap with exons
     exon_overlap = False
     for exon in exon_regions:

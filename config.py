@@ -33,9 +33,9 @@ FISH_RT_CONFIG = {
     "transcript_selection": "longest",
     "output_directory": "/Users/gmgao/Dropbox/Caltech_PostDoc_GuttmanLab/constructs_and_smiFISH/smFISH_like_focusedRT-XCI",
     # LOCAL FILE PATHS (YOUR SERVER FILES)
-    "local_gtf_path": "/Volumes/guttman-1/annotations/mm10/Mus_musculus.GRCm38.96.sorted.gtf",
-    "local_genome_fasta_path": "/Volumes/guttman-1/genomes/mm10/GRCm38_68.fa",
-    "snp_file_path": "/Volumes/guttman-1/data/snps/Bl6xCast.mm10.snps",
+    "local_gtf_path": "/Volumes/groups/guttman/annotations/mm10/Mus_musculus.GRCm38.96.sorted.gtf",
+    "local_genome_fasta_path": "/Volumes/groups/guttman/genomes/mm10/GRCm38_68.fa",
+    "snp_file_path": "/Volumes/groups/guttman/data/snps/Bl6xCast.mm10.snps",
     # RT COVERAGE SETTINGS (UNCHANGED as requested)
     "rt_coverage_downstream": 100,  # nt downstream in RNA 5'→3' direction
     "include_probe_in_coverage": False,  # Strictly downstream

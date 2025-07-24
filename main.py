@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# main.py - smfish-like-rt-probe-designer (Local Files + Stringent Filtering)
+
+# main.py - smfish-like-rt-probe-designer
 
 import os
 import sys
@@ -23,23 +24,17 @@ def setup_output_directory(output_path):
     """Create output directory structure"""
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
-
     (output_path / "gene_sequences").mkdir(exist_ok=True)
-    # (output_path / "snp_analysis").mkdir(exist_ok=True)
-    # (output_path / "fasta_for_blast").mkdir(exist_ok=True)
-
     return output_path
 
 
 def apply_early_filtering(probes, config):
     """Apply stringent filtering early to focus on high-quality probes only"""
-
     console.print(
         f"[cyan]Applying stringent filtering to {len(probes)} probes...[/cyan]"
     )
 
     filtered_probes = []
-
     filter_stats = {
         "total": len(probes),
         "gc_pass": 0,
@@ -69,28 +64,23 @@ def apply_early_filtering(probes, config):
 
     # Report filtering statistics
     console.print(f"[green]Filtering Results:[/green]")
-    console.print(f"  Total probes: {filter_stats['total']}")
-    console.print(f"  GC filter pass: {filter_stats['gc_pass']}")
-    console.print(f"  PNAS filter pass: {filter_stats['pnas_pass']}")
-    console.print(f"  Dustmasker pass: {filter_stats['dustmasker_pass']}")
-    console.print(f"  All filters pass: {filter_stats['all_filters_pass']}")
+    console.print(f" Total probes: {filter_stats['total']}")
+    console.print(f" GC filter pass: {filter_stats['gc_pass']}")
+    console.print(f" PNAS filter pass: {filter_stats['pnas_pass']}")
+    console.print(f" Dustmasker pass: {filter_stats['dustmasker_pass']}")
+    console.print(f" All filters pass: {filter_stats['all_filters_pass']}")
     console.print(
-        f"  Retention rate: {filter_stats['all_filters_pass']/filter_stats['total']*100:.1f}%"
+        f" Retention rate: {filter_stats['all_filters_pass']/filter_stats['total']*100:.1f}%"
     )
 
     return filtered_probes
 
 
 def main():
-    """Main FISH-RT probe design pipeline (Local Files + Stringent Filtering)"""
-
-    console.print(
-        "[bold blue]🧬 smfish-like-rt-probe-designer (Local Files + Stringent)[/bold blue]"
-    )
+    """Main FISH-RT probe design pipeline"""
+    console.print("[bold blue]🧬 smfish-like-rt-probe-designer[/bold blue]")
     console.print("=" * 60)
-    console.print(
-        "[cyan]Mode: Local GTF + FASTA files only + Stringent filtering[/cyan]"
-    )
+    console.print("[cyan]Mode: Local GTF + FASTA files only[/cyan]")
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
@@ -106,7 +96,7 @@ def main():
     # Load configuration
     config = FISH_RT_CONFIG.copy()
 
-    # FIXED: Use config default if --output not provided
+    # Use config default if --output not provided
     if args.output:
         config["output_directory"] = args.output
         console.print(f"[yellow]Using custom output directory: {args.output}[/yellow]")
@@ -130,28 +120,23 @@ def main():
     output_path = setup_output_directory(config["output_directory"])
     console.print(f"[green]Output directory: {output_path}[/green]")
 
-    # Show stringent filtering configuration
-    console.print(f"\n[bold]Stringent Filtering Configuration:[/bold]")
-    console.print(f"  PNAS rules: {config['pnas_filter_rules']}")
+    # Show configuration
+    console.print(f"\n[bold]Configuration:[/bold]")
+    console.print(f" PNAS rules: {config['pnas_filter_rules']}")
     console.print(
-        f"  Dustmasker: {'✅ Enabled' if config['use_dustmasker'] else '❌ Disabled'}"
+        f" Dustmasker: {'✅ Enabled' if config['use_dustmasker'] else '❌ Disabled'}"
     )
-    console.print(f"  Min SNP coverage: {config['min_snp_coverage_for_final']}")
-    console.print(f"  RT coverage: {config['rt_coverage_downstream']} nt downstream")
-    console.print(
-        f"  Generate ALL file: {'✅ Yes' if config['generate_all_probes_file'] else '❌ No (FILT only)'}"
-    )
+    console.print(f" Min SNP coverage: {config['min_snp_coverage_for_final']}")
+    console.print(f" RT coverage: {config['rt_coverage_downstream']} nt downstream")
 
     # Initialize components
     console.print("\n[bold]Initializing pipeline components...[/bold]")
-
     gene_fetcher = GeneSequenceFetcher(config)
     snp_analyzer = SNPCoverageAnalyzer(config) if config["snp_file_path"] else None
     output_generator = OutputGenerator(config)
 
     # Step 1: Fetch gene sequences
     console.print("\n[bold cyan]Step 1: Fetching gene sequences...[/bold cyan]")
-
     all_gene_data = []
     failed_genes = []
 
@@ -161,7 +146,7 @@ def main():
             if gene_data:
                 all_gene_data.append(gene_data)
                 console.print(
-                    f"✅ {gene_name}: {len(gene_data['sequence'])} bp ({gene_data['source']})"
+                    f"✅ {gene_name}: {len(gene_data['sequence'])} bp ({gene_data['source']}) strand {gene_data['strand']}"
                 )
             else:
                 failed_genes.append(gene_name)
@@ -179,13 +164,13 @@ def main():
         console.print("[red]No genes successfully fetched. Exiting.[/red]")
         return
 
-    # Save gene sequences
+    # Save gene sequences (for validation)
     gene_fetcher.save_gene_sequences(all_gene_data, output_path / "gene_sequences")
 
     # Step 2: Design FISH probes
     console.print("\n[bold cyan]Step 2: Designing FISH probes...[/bold cyan]")
-
     all_probes = []
+
     for gene_data in track(all_gene_data, description="Designing probes..."):
         try:
             probes = design_fish_probes(gene_data, config)
@@ -193,7 +178,7 @@ def main():
                 all_probes.extend(probes)
                 console.print(f"✅ {gene_data['gene_name']}: {len(probes)} probes")
             else:
-                console.print(f"⚠️  {gene_data['gene_name']}: No probes generated")
+                console.print(f"⚠️ {gene_data['gene_name']}: No probes generated")
         except Exception as e:
             console.print(f"❌ {gene_data['gene_name']}: Error - {str(e)}")
 
@@ -203,9 +188,8 @@ def main():
 
     console.print(f"[green]Total probes designed: {len(all_probes)}[/green]")
 
-    # Step 3: Early stringent filtering (CRITICAL)
+    # Step 3: Early stringent filtering
     console.print("\n[bold cyan]Step 3: Early stringent filtering...[/bold cyan]")
-
     high_quality_probes = apply_early_filtering(all_probes, config)
 
     if not high_quality_probes:
@@ -235,10 +219,10 @@ def main():
             )
 
             console.print(f"✅ SNP coverage analysis completed")
-            console.print(f"   Average SNPs per probe: {avg_snps:.1f}")
-            console.print(f"   Maximum SNPs per probe: {max_snps}")
+            console.print(f" Average SNPs per probe: {avg_snps:.1f}")
+            console.print(f" Maximum SNPs per probe: {max_snps}")
             console.print(
-                f"   Probes with ≥{config['min_snp_coverage_for_final']} SNPs: {high_snp_count}"
+                f" Probes with ≥{config['min_snp_coverage_for_final']} SNPs: {high_snp_count}"
             )
 
         except Exception as e:
@@ -248,7 +232,7 @@ def main():
             "\n[yellow]Step 4: SNP analysis skipped (no SNP file configured)[/yellow]"
         )
 
-    # Step 5: Generate focused output files (FILT + HIGH_SNP only)
+    # Step 5: Generate focused output files
     console.print(
         f"\n[bold cyan]Step 5: Generating focused output files...[/bold cyan]"
     )
@@ -261,18 +245,17 @@ def main():
         console.print("[bold green]✅ Pipeline completed successfully![/bold green]")
         console.print(f"[green]Generated files:[/green]")
         for file_path in output_files:
-            console.print(f"  📄 {file_path}")
+            console.print(f" 📄 {file_path}")
 
         # Final summary
         if output_files:
             csv_files = [f for f in output_files if str(f).endswith(".csv")]
             if csv_files:
                 df_filt = pd.read_csv(csv_files[0])
-
                 console.print(f"\n[bold]📊 Final Summary:[/bold]")
-                console.print(f"  High-quality probes: {len(df_filt)}")
-                console.print(f"  Genes processed: {len(set(df_filt['GeneName']))}")
-                console.print(f"  Output directory: {output_path}")
+                console.print(f" High-quality probes: {len(df_filt)}")
+                console.print(f" Genes processed: {len(set(df_filt['GeneName']))}")
+                console.print(f" Output directory: {output_path}")
 
                 if "SNPs_Covered_Count" in df_filt.columns:
                     avg_snps = df_filt["SNPs_Covered_Count"].mean()
@@ -280,9 +263,9 @@ def main():
                         df_filt["SNPs_Covered_Count"]
                         >= config["min_snp_coverage_for_final"]
                     ).sum()
-                    console.print(f"  Average SNPs covered: {avg_snps:.1f}")
+                    console.print(f" Average SNPs covered: {avg_snps:.1f}")
                     console.print(
-                        f"  Probes with ≥{config['min_snp_coverage_for_final']} SNPs: {high_snp_final}"
+                        f" Probes with ≥{config['min_snp_coverage_for_final']} SNPs: {high_snp_final}"
                     )
 
     except Exception as e:
