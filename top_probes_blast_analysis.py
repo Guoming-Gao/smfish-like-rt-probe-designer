@@ -6,6 +6,9 @@ import re
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 import os
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 
 
 def parse_blast_results(blast_text):
@@ -266,6 +269,33 @@ def main():
     unique_csv_path = f"{base_csv_name}_UNIQUE_HITS.csv"
     unique_df.to_csv(unique_csv_path, index=False)
     print(f"✅ Unique hits saved: {os.path.basename(unique_csv_path)}")
+
+    # NEW: Save unique hits as FASTA file
+    if len(unique_df) > 0:
+        unique_fasta_path = f"{base_csv_name}_UNIQUE_HITS.fasta"
+
+        records = []
+        for idx, row in unique_df.iterrows():
+            gene_name = row.get("GeneName", "Unknown")
+            sequence = row.get("Seq", "")
+            snp_count = row.get("SNPs_Covered_Count", 0)
+            pnas_score = row.get("NbOfPNAS", 0)
+            percent_identity = row.get("PercentAlignment", 0)
+
+            # Create descriptive FASTA header
+            header = f"{gene_name}_unique_{idx}"
+            description = f"Gene:{gene_name} | SNPs:{snp_count} | PNAS:{pnas_score} | Identity:{percent_identity}% | BLAST_unique"
+
+            record = SeqRecord(Seq(sequence), id=header, description=description)
+            records.append(record)
+
+        # Write FASTA file
+        SeqIO.write(records, unique_fasta_path, "fasta")
+        print(
+            f"✅ Unique hits FASTA saved: {os.path.basename(unique_fasta_path)} ({len(records)} sequences)"
+        )
+    else:
+        print(f"⚠️  No unique hits to export as FASTA")
 
     # Step 8: Quality assessment
     print(f"\n🎯 Quality Assessment:")
