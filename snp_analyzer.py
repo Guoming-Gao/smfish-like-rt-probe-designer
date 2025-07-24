@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from rich.console import Console
+from rich.progress import track
 
 console = Console()
 
@@ -90,7 +91,7 @@ class SNPCoverageAnalyzer:
             f"[cyan]Analyzing SNP coverage for {len(probe_list)} probes...[/cyan]"
         )
 
-        for probe in probe_list:
+        for probe in track(probe_list):
             try:
                 # Calculate RT coverage region in genomic coordinates
                 rt_coverage = self._calculate_rt_coverage_coords(probe)
