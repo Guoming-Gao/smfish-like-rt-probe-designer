@@ -130,5 +130,3 @@ Based on the original Oligostan algorithm from:
 ## License
 
 MIT License - see LICENSE file for details.
-
-[1] https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/12972855/af22f40a-ecca-45a5-8546-f9b28849aaab/README.md
