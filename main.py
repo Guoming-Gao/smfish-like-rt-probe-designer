@@ -14,6 +14,7 @@ from rich.console import Console
 from config import FISH_RT_CONFIG, TEST_GENES_21
 from gene_fetcher import GeneSequenceFetcher
 from utils.oligostan_core import design_fish_probes
+from utils.sequence_utils import validate_probe_strand_complementarity
 from snp_analyzer import SNPCoverageAnalyzer
 from output_generator import OutputGenerator
 
@@ -76,11 +77,57 @@ def apply_early_filtering(probes, config):
     return filtered_probes
 
 
+def validate_probe_orientations(probes, gene_data_list, config):
+    """
+    NEW: Validate probe strand orientations against gene strands
+    """
+    console.print(f"[cyan]🔍 Validating probe strand orientations...[/cyan]")
+
+    # Create gene lookup
+    gene_lookup = {gene["gene_name"]: gene for gene in gene_data_list}
+
+    validation_results = []
+    issues_found = 0
+
+    for probe in probes:
+        gene_name = probe.get("GeneName")
+        if gene_name in gene_lookup:
+            gene_data = gene_lookup[gene_name]
+            validation = validate_probe_strand_complementarity(probe, gene_data)
+            validation_results.append(validation)
+
+            if not validation["overall_validation"]:
+                issues_found += 1
+                console.print(
+                    f"[red]❌ {gene_name}: Gene strand {validation['gene_strand']}, "
+                    f"Target {validation['target_strand']}, Probe {validation['probe_strand']} "
+                    f"(Expected: Target {validation['expected_target']}, Probe {validation['expected_probe']})[/red]"
+                )
+
+    # Summary
+    total_validated = len(validation_results)
+    if issues_found == 0:
+        console.print(
+            f"[green]✅ All {total_validated} probes have correct strand orientations![/green]"
+        )
+    else:
+        console.print(
+            f"[red]❌ Found {issues_found}/{total_validated} probes with incorrect orientations![/red]"
+        )
+        console.print(
+            f"[red]   This indicates a serious bug in sequence preparation.[/red]"
+        )
+
+    return validation_results
+
+
 def main():
-    """Main FISH-RT probe design pipeline"""
-    console.print("[bold blue]🧬 smfish-like-rt-probe-designer[/bold blue]")
+    """Main FISH-RT probe design pipeline (FIXED: Added validation)"""
+    console.print(
+        "[bold blue]🧬 smfish-like-rt-probe-designer (FIXED: Strand validation)[/bold blue]"
+    )
     console.print("=" * 60)
-    console.print("[cyan]Mode: Local GTF + FASTA files only[/cyan]")
+    console.print("[cyan]Mode: Local GTF + FASTA files only + Strand validation[/cyan]")
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
@@ -91,6 +138,9 @@ def main():
     )
     parser.add_argument("--genes", nargs="+", help="List of gene names to process")
     parser.add_argument("--test", action="store_true", help="Run with test gene set")
+    parser.add_argument(
+        "--validate-only", action="store_true", help="Only run strand validation"
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -167,6 +217,13 @@ def main():
     # Save gene sequences (for validation)
     gene_fetcher.save_gene_sequences(all_gene_data, output_path / "gene_sequences")
 
+    # NEW: Validate gene sequence orientations
+    validation_results = gene_fetcher.validate_strand_orientation(all_gene_data)
+
+    if args.validate_only:
+        console.print("[yellow]Validation-only mode complete. Exiting.[/yellow]")
+        return
+
     # Step 2: Design FISH probes
     console.print("\n[bold cyan]Step 2: Designing FISH probes...[/bold cyan]")
     all_probes = []
@@ -188,6 +245,10 @@ def main():
 
     console.print(f"[green]Total probes designed: {len(all_probes)}[/green]")
 
+    # NEW: Step 2.5: Validate probe strand orientations
+    console.print("\n[bold cyan]Step 2.5: Validating probe orientations...[/bold cyan]")
+    probe_validations = validate_probe_orientations(all_probes, all_gene_data, config)
+
     # Step 3: Early stringent filtering
     console.print("\n[bold cyan]Step 3: Early stringent filtering...[/bold cyan]")
     high_quality_probes = apply_early_filtering(all_probes, config)
@@ -200,13 +261,34 @@ def main():
 
     console.print(f"[green]High-quality probes: {len(high_quality_probes)}[/green]")
 
-    # Step 4: SNP analysis (only on filtered probes)
+    # Step 4: SNP analysis (only on filtered probes) - UPDATED WITH PROGRESS BAR
     if snp_analyzer:
         console.print(
             f"\n[bold cyan]Step 4: SNP analysis (filtered probes only)...[/bold cyan]"
         )
         try:
-            high_quality_probes = snp_analyzer.analyze_probes(high_quality_probes)
+            # UPDATED: Add progress bar for SNP analysis
+            updated_probes = []
+            for probe in track(
+                high_quality_probes, description="Analyzing SNP coverage..."
+            ):
+                # Try individual probe analysis first
+                try:
+                    if hasattr(snp_analyzer, "analyze_probe"):
+                        updated_probe = snp_analyzer.analyze_probe(probe)
+                    else:
+                        # Fallback: analyze single probe using analyze_probes
+                        updated_probe = snp_analyzer.analyze_probes([probe])[0]
+                    updated_probes.append(updated_probe)
+                except Exception as probe_error:
+                    console.print(
+                        f"⚠️ SNP analysis failed for probe: {str(probe_error)}"
+                    )
+                    updated_probes.append(
+                        probe
+                    )  # Keep original probe if analysis fails
+
+            high_quality_probes = updated_probes
 
             # Report SNP coverage statistics
             snp_counts = [p.get("SNPs_Covered_Count", 0) for p in high_quality_probes]
