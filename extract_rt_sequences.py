@@ -54,7 +54,7 @@ def extract_rt_sequences(input_file, output_file):
     """Extract RT coverage sequences and validate target sequences"""
 
     # Genome path
-    genome_fasta_path = "/home/gmgao/Desktop/Central_Guttman/genomes/mm10/GRCm3868.fa"
+    genome_fasta_path = "/home/gmgao/Desktop/Central_Guttman/genomes/mm10/GRCm38_68.fa"
 
     print(f"Reading input file: {input_file}")
 
