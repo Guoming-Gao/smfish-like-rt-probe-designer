@@ -11,20 +11,24 @@ def load_genome(genome_fasta_path):
     print("Loading genome sequences...")
     genome = {}
     for record in SeqIO.parse(genome_fasta_path, "fasta"):
-        # Handle both "chr1" and "1" chromosome naming
+        # Store chromosome sequences using their exact names from FASTA
         chrom_name = record.id
-        if chrom_name.startswith("chr"):
-            chrom_name = chrom_name[3:]  # Remove "chr" prefix
         genome[chrom_name] = str(record.seq).upper()
+
     print(f"Loaded {len(genome)} chromosomes")
+    print(f"Available chromosomes: {sorted(genome.keys())[:10]}...")
     return genome
 
 
 def extract_sequence(chromosome, start, end, strand, genome):
     """Extract sequence from genome dictionary"""
     try:
+        # Convert chromosome to string to handle any data type issues
+        chromosome = str(chromosome)
+
         if chromosome not in genome:
-            print(f"  ✗ Chromosome {chromosome} not found in genome")
+            print(f"  ✗ Chromosome '{chromosome}' not found in genome")
+            print(f"    Available chromosomes: {sorted(genome.keys())}")
             return None
 
         chrom_seq = genome[chromosome]
@@ -34,7 +38,9 @@ def extract_sequence(chromosome, start, end, strand, genome):
         seq_end = end
 
         if seq_start < 0 or seq_end > len(chrom_seq):
-            print(f"  ✗ Coordinates out of bounds: {start}-{end}")
+            print(
+                f"  ✗ Coordinates out of bounds: {start}-{end} (chr length: {len(chrom_seq)})"
+            )
             return None
 
         genomic_sequence = chrom_seq[seq_start:seq_end]
@@ -53,7 +59,7 @@ def extract_sequence(chromosome, start, end, strand, genome):
 def extract_rt_sequences(input_file, output_file):
     """Extract RT coverage sequences and validate target sequences"""
 
-    # Genome path
+    # Correct genome path from your diagnostic output
     genome_fasta_path = "/home/gmgao/Desktop/Central_Guttman/genomes/mm10/GRCm38_68.fa"
 
     print(f"Reading input file: {input_file}")
@@ -69,12 +75,19 @@ def extract_rt_sequences(input_file, output_file):
     # Load genome sequences
     genome = load_genome(genome_fasta_path)
 
+    # Check what chromosomes we need
+    needed_chroms = df["Chromosome"].unique()
+    print(f"\nChromosomes needed: {sorted([str(c) for c in needed_chroms])}")
+
     # Initialize RT_seq column
     df["RT_seq"] = ""
 
     # Process each probe
+    success_count = 0
     for idx, row in df.iterrows():
-        print(f"Processing {idx+1}/{len(df)}: {row['GeneName']}")
+        print(
+            f"Processing {idx+1}/{len(df)}: {row['GeneName']} (chr{row['Chromosome']})"
+        )
 
         # Extract target sequence for validation
         target_seq = extract_sequence(
@@ -106,6 +119,7 @@ def extract_rt_sequences(input_file, output_file):
         if rt_seq:
             df.at[idx, "RT_seq"] = rt_seq
             print(f"  ✓ RT sequence extracted ({len(rt_seq)} bp)")
+            success_count += 1
         else:
             print(f"  ✗ Failed to extract RT sequence")
 
@@ -132,15 +146,17 @@ def extract_rt_sequences(input_file, output_file):
     output_df.to_csv(output_file, index=False)
     print(f"\nOutput saved to: {output_file}")
     print(f"Total probes processed: {len(output_df)}")
-    print(f"RT sequences extracted: {len(output_df[output_df['RT_seq'] != ''])}")
+    print(f"RT sequences extracted: {success_count}")
 
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 3:
-        print("Usage: python extract_rt_sequences.py <input_file> <output_file>")
-        print("Example: python extract_rt_sequences.py probes.xlsx probes_with_rt.csv")
+        print("Usage: python extract_rt_sequences_fixed.py <input_file> <output_file>")
+        print(
+            "Example: python extract_rt_sequences_fixed.py probes.xlsx probes_with_rt.csv"
+        )
         sys.exit(1)
 
     input_file = sys.argv[1]
