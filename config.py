@@ -33,9 +33,12 @@ FISH_RT_CONFIG = {
     "transcript_selection": "longest",
     "output_directory": "/Users/gmgao/Dropbox/Caltech_PostDoc_GuttmanLab/constructs_and_smiFISH/smFISH_like_focusedRT-XCI",
     # LOCAL FILE PATHS (YOUR SERVER FILES)
-    "local_gtf_path": "/Volumes/groups/guttman/annotations/mm10/Mus_musculus.GRCm38.96.sorted.gtf",
-    "local_genome_fasta_path": "/Volumes/groups/guttman/genomes/mm10/GRCm38_68.fa",
-    "snp_file_path": "/Volumes/groups/guttman/data/snps/Bl6xCast.mm10.snps",
+    "local_gtf_path": "/Volumes/guttman/genomes/mm10/annotation/mm10.refGene.gtf.gz",
+    "local_genome_fasta_path": "/Volumes/guttman/genomes/mm10/fasta/mm10.fa",  # Requires one-time: gunzip -k mm10.fa.gz && samtools faidx mm10.fa
+    "snp_file_path": "/Volumes/guttman/genomes/mm10/variants/mgp.v5.merged.snps_all.dbSNP142.vcf.gz",
+    # VCF SAMPLE NAMES (for B6 x Cast SNP filtering)
+    "vcf_b6_sample": "C57BL_6NJ",  # B6 reference strain
+    "vcf_cast_sample": "CAST_EiJ",  # Cast strain for allelic analysis
     # RT COVERAGE SETTINGS (UNCHANGED as requested)
     "rt_coverage_downstream": 100,  # nt downstream in RNA 5'→3' direction
     "include_probe_in_coverage": False,  # Strictly downstream
@@ -56,7 +59,7 @@ FISH_RT_CONFIG = {
     "use_dustmasker": True,  # ENABLED (FIXED)
     "max_masked_percent": 0.1,
     # SNP COVERAGE FILTERING (FIXED - missing parameter added)
-    "min_snp_coverage_for_final": 2,  # FIXED: Minimum SNPs for final output
+    "min_snp_coverage_for_final": 5,  # Minimum SNPs for HIGH_SNP output file
     "generate_all_probes_file": False,  # FIXED: Skip ALL.csv generation
     "focus_on_high_quality_only": True,  # FIXED: Only process filtered probes
     # FASTA OUTPUT SETTINGS

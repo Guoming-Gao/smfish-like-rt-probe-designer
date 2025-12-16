@@ -3,6 +3,7 @@
 import pandas as pd
 import subprocess
 import tempfile
+import gzip
 from pathlib import Path
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -43,14 +44,22 @@ class GeneSequenceFetcher:
             console.print(f"[yellow] FASTA: {self.genome_fasta_path}[/yellow]")
 
     def _load_gtf_data(self):
-        """Load and parse GTF file"""
+        """Load and parse GTF file (supports gzipped and refGene format)"""
         console.print(f"[cyan]Loading GTF data...[/cyan]")
         try:
             genes = {}
             transcripts = {}
             exons = {}
+            # Track transcript info for inferring genes (refGene format has no "gene" features)
+            transcript_gene_info = {}
 
-            with open(self.gtf_path, "r") as f:
+            # Handle gzipped files
+            if self.gtf_path.endswith(".gz"):
+                file_handle = gzip.open(self.gtf_path, "rt")
+            else:
+                file_handle = open(self.gtf_path, "r")
+
+            with file_handle as f:
                 for line in f:
                     if line.startswith("#") or not line.strip():
                         continue
@@ -77,7 +86,7 @@ class GeneSequenceFetcher:
                     if not gene_name:
                         continue
 
-                    # Store gene information
+                    # Store gene information (Ensembl format has explicit "gene" features)
                     if feature == "gene":
                         genes[gene_name] = {
                             "chromosome": chrom,
@@ -103,6 +112,22 @@ class GeneSequenceFetcher:
                                     "is_canonical": "basic" in attributes,
                                 }
                             )
+                            # Track for inferring gene info (refGene format)
+                            if gene_name not in transcript_gene_info:
+                                transcript_gene_info[gene_name] = {
+                                    "chromosome": chrom,
+                                    "strand": 1 if strand == "+" else -1,
+                                    "gene_id": attr_dict.get("gene_id", "").strip('"'),
+                                    "min_start": int(start),
+                                    "max_end": int(end),
+                                }
+                            else:
+                                transcript_gene_info[gene_name]["min_start"] = min(
+                                    transcript_gene_info[gene_name]["min_start"], int(start)
+                                )
+                                transcript_gene_info[gene_name]["max_end"] = max(
+                                    transcript_gene_info[gene_name]["max_end"], int(end)
+                                )
 
                     # Store exon information
                     elif feature == "exon":
@@ -116,6 +141,19 @@ class GeneSequenceFetcher:
                                 {"start": int(start), "end": int(end)}
                             )
 
+            # Infer genes from transcripts for refGene format (no explicit "gene" features)
+            if len(genes) == 0 and len(transcript_gene_info) > 0:
+                console.print(f"[yellow]No 'gene' features found, inferring from transcripts (refGene format)[/yellow]")
+                for gene_name, info in transcript_gene_info.items():
+                    genes[gene_name] = {
+                        "chromosome": info["chromosome"],
+                        "start": info["min_start"],
+                        "end": info["max_end"],
+                        "strand": info["strand"],
+                        "gene_id": info["gene_id"],
+                        "biotype": "protein_coding",  # Default for refGene
+                    }
+
             self.gene_cache = {
                 "genes": genes,
                 "transcripts": transcripts,
@@ -126,6 +164,8 @@ class GeneSequenceFetcher:
 
         except Exception as e:
             console.print(f"[red]Error loading GTF: {e}[/red]")
+            import traceback
+            traceback.print_exc()
             self.use_local_files = False
 
     def _parse_gtf_attributes(self, attributes):

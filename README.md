@@ -1,190 +1,135 @@
 # smfish-like-rt-probe-designer
 
-Design focused RT primers for SWIFT-seq using smFISH probe design principles, with comprehensive SNP coverage analysis for allelic expression studies.
-
-## Overview
-
-This tool applies the thermodynamic rigor of the Oligostan algorithm (originally developed for smFISH probe design) to design **focused RT primers for SWIFT-seq workflows**. By leveraging proven oligonucleotide design principles, it generates high-quality primers optimized for reverse transcription.
-
-Key features:
-- **Gene-based input** (gene symbols instead of FASTA files)
-- **Oligostan thermodynamic optimization** (dG37 targeting for optimal hybridization)
-- **Strand-aware RT coverage analysis** (100 nt downstream of primer binding site)
-- **SNP profiling** for allelic expression studies (B6xCast mouse strains)
-- **BLAST specificity filtering** for unique genomic targets
-- **RTBC barcode integration** for SWIFT-seq compatibility
-
-## How It Works
-
-The pipeline uses smFISH probe design principles to create RT primers:
-
-1. **Thermodynamic scoring**: Calculates dG37 (Gibbs free energy at 37°C) using nearest-neighbor dinucleotide values, targeting optimal dG = -32.0
-2. **Quality filtering**: Applies GC content (40-60%), PNAS biochemical rules, and dustmasker repeat filtering
-3. **RT coverage analysis**: For each primer, calculates the 100 nt region downstream (in RNA 5'→3' direction) that will be reverse-transcribed
-4. **SNP profiling**: Identifies SNPs within the RT coverage region for allelic expression detection
+Design focused RT primers for SWIFT-seq using smFISH probe design principles (Oligostan), with SNP coverage analysis for B6xCast allelic expression studies.
 
 ## Quick Start
 
-Install dependencies:
 ```bash
 pip install -r requirements.txt
+python main.py --genes Nanog Pou5f1 Xist --output ./my_output
 ```
 
-Run with test gene set:
-```bash
-python main.py --test --output ./test_output
+## Pipeline Overview
+
+```
+Gene Symbols → [GTF/FASTA] → [Oligostan dG37] → [Filters] → [VCF SNP Analysis] → Output
 ```
 
-Run with specific genes:
-```bash
-python main.py --genes Nanog Pou5f1 Sox2 --output ./my_analysis
-```
+1. **Fetch sequences** from GTF + FASTA (supports gzipped refGene format)
+2. **Design primers** (26-32 nt) using Oligostan thermodynamic optimization (dG37 = -32.0)
+3. **Filter** by GC content (40-60%), PNAS rules, dustmasker
+4. **Analyze SNPs** in RT coverage region (100 nt downstream) using VCF with tabix
+5. **Output** CSV and FASTA files with RTBC barcodes for SWIFT-seq
 
-Run with custom gene list from config:
-```bash
-python main.py --output ./full_analysis
-```
+## Output Files
 
-## Complete Workflow: From Design to Final Primer Selection
+| Step | File | Description |
+|------|------|-------------|
+| 1 | `FISH_RT_probes_FILTERED.csv` | All primers passing quality filters |
+| 1 | `FISH_RT_probes_HIGH_SNP_5plus.csv` | Primers with ≥5 B6/Cast SNP differences |
+| 1 | `FISH_RT_probe_sequences_for_BLAST.fasta` | For NCBI BLAST validation |
+| 2 | `FISH_RT_probes_TOP10.csv` | Top N per gene (via `probe_picker_gui.py`) |
+| 4 | `*_UNIQUE_HITS.csv` | Final synthesis-ready primers (via `top_probes_blast_analysis.py`) |
 
-### Step 1: Initial Primer Design
-Run the main pipeline to generate high-quality RT primers with SNP coverage analysis:
-
-```bash
-python main.py --genes Nanog Pou5f1 Sox2 --output ./primer_design
-```
-
-This generates stringently filtered primers (GC + PNAS rules + dustmasker + SNP coverage ≥2) in:
-- `FISH_RT_probes_FILTERED.csv` - All high-quality primers
-- `FISH_RT_probes_HIGH_SNP_2plus.csv` - Primers with high SNP coverage
-
-### Step 2: Primer Selection (Interactive GUI)
-Use the primer picker to select top primers per gene (default: 10 per gene):
+## Workflow
 
 ```bash
+# Step 1: Design primers
+python main.py --test --output ./results
+
+# Step 2: Select top primers per gene (GUI)
 python probe_picker_gui.py
-```
 
-1. **Load your CSV file** (e.g., `FISH_RT_probes_HIGH_SNP_2plus.csv`)
-2. **Adjust parameters** (primers per gene, filters)
-3. **Select top primers** - sorted by SNP coverage and PNAS score
-4. **Export results** as `FISH_RT_probes_TOP10.csv` and `FISH_RT_probes_TOP10.fasta`
+# Step 3: BLAST validation (manual at NCBI)
 
-### Step 3: BLAST Specificity Check
-Submit the selected primers to NCBI BLAST for specificity validation:
-
-1. **Go to NCBI BLAST**: https://blast.ncbi.nlm.nih.gov/Blast.cgi
-2. **Upload FASTA**: Use `FISH_RT_probes_TOP10.fasta` (primer sequences only, no RTBC)
-3. **Database**: Select "Mouse genomic + transcript"
-4. **Parameters**: Use default settings or adjust e-value as needed
-5. **Download results**: Save as plain text format (`.txt` file)
-
-### Step 4: BLAST Analysis & Final Selection
-Analyze BLAST results to identify primers with unique genomic targets:
-
-```bash
+# Step 4: Filter for unique hits
 python top_probes_blast_analysis.py
 ```
 
-1. **Select BLAST text file** from Step 3
-2. **Select CSV file** (`FISH_RT_probes_TOP10.csv`) from Step 2
-3. **Review analysis** - identifies primers with exactly 1 genomic hit
-4. **Use final output**: `*_UNIQUE_HITS.csv` contains primers ready for synthesis
-
-### Final Output
-- **Experiment-ready primers**: Use `*_UNIQUE_HITS.csv` for primer synthesis
-- **Quality metrics**: 100% identity, unique genomic targets, high SNP coverage
-- **Synthesis sequences**: RTBC-containing sequences ready for ordering
-
-## Pipeline Architecture
-
-```
-Gene Symbols (e.g., Nanog, Pou5f1, Sox2)
-    ↓
-[Gene Fetcher] → Parse GTF, extract sequences from FASTA
-    ↓
-[Oligostan Algorithm] → Design primers (26-32 nt) with dG37 optimization
-    ↓
-[Stringent Filtering] → GC content, PNAS rules, dustmasker
-    ↓
-[SNP Analysis] → Calculate RT coverage region, find overlapping SNPs
-    ↓
-[Output] → CSV files, FASTA files (with/without RTBC barcodes)
-```
-
-## Features
-
-- **Gene Symbol Input**: Automatic sequence fetching via local GTF/FASTA files
-- **Thermodynamic Optimization**: Oligostan algorithm targeting dG37 = -32.0
-- **Strand-Aware RT Coverage**: Calculates downstream region in RNA 5'→3' direction
-- **SNP Analysis**: Coverage profiling for B6xCast allelic expression studies
-- **Stringent Filtering**: GC content + PNAS biochemical rules + dustmasker
-- **Interactive Selection**: GUI-based primer picker for optimal subset selection
-- **RTBC Barcode Integration**: `/5Phos/TGACTTGAGGAT` prefix for SWIFT-seq
-- **Batch Processing**: Process multiple genes efficiently
-
-### PNAS Filter Rules
-
-Biochemical quality rules to ensure primer synthesis and hybridization:
-1. **Rule 1**: Adenine content < 28%
-2. **Rule 2**: No AAAA homopolymer runs
-3. **Rule 3**: Cytosine content 22-28%
-4. **Rule 4**: No CCCC homopolymer runs
-5. **Rule 5**: No 6-nt window with >50% cytosine
-
 ## Configuration
 
-Edit `config.py` to customize:
+Edit `config.py`:
 
 ```python
 FISH_RT_CONFIG = {
-    'gene_list': ['Nanog', 'Pou5f1', 'Sox2'],  # Your genes
-    'rt_coverage_downstream': 100,  # RT coverage length (nt)
-    'rtbc_sequence': '/5Phos/TGACTTGAGGAT',  # RTBC barcode for SWIFT-seq
-    'local_gtf_path': '/path/to/annotations.gtf',  # Local GTF file
-    'local_genome_fasta_path': '/path/to/genome.fa',  # Local FASTA file
-    'snp_file_path': '/path/to/snps.txt',  # SNP file (B6xCast)
-    'min_snp_coverage_for_final': 2,  # Minimum SNPs for final output
-    'fixed_dg37_value': -32.0,  # Target Gibbs free energy
-    'probe_length_min': 26,  # Minimum primer length
-    'probe_length_max': 32,  # Maximum primer length
+    # Input files (mm10)
+    "local_gtf_path": "/Volumes/guttman/genomes/mm10/annotation/mm10.refGene.gtf.gz",
+    "local_genome_fasta_path": "/Volumes/guttman/genomes/mm10/fasta/mm10.fa",
+    "snp_file_path": "/Volumes/guttman/genomes/mm10/variants/mgp.v5.merged.snps_all.dbSNP142.vcf.gz",
+
+    # VCF samples for allelic SNP detection
+    "vcf_b6_sample": "C57BL_6NJ",
+    "vcf_cast_sample": "CAST_EiJ",
+
+    # Parameters
+    "rt_coverage_downstream": 100,      # nt downstream for SNP detection
+    "min_snp_coverage_for_final": 5,    # Minimum B6/Cast SNP differences
+    "fixed_dg37_value": -32.0,          # Target Gibbs free energy
+    "probe_length_min": 26,
+    "probe_length_max": 32,
 }
 ```
 
 ## Requirements
 
 - Python 3.7+
-- Local genome files (GTF + FASTA + SNP files for mm10)
-- NCBI BLAST web interface (for specificity analysis)
+- **pysam** (for VCF/tabix queries)
+- biopython, pandas, numpy, rich
+- samtools (for FASTA indexing)
 
-### Python Dependencies
-- biopython
-- pandas
-- numpy
-- rich (for progress display)
-- tkinter (for GUI)
+**One-time setup** (if FASTA not indexed):
+```bash
+cd /Volumes/guttman/genomes/mm10/fasta/
+gunzip -k mm10.fa.gz && samtools faidx mm10.fa
+```
 
-## File Descriptions
+## File Formats Supported
+
+| File | Format | Notes |
+|------|--------|-------|
+| GTF | Gzipped refGene or Ensembl | Auto-infers genes from transcripts if no "gene" features |
+| FASTA | Indexed (`.fai` required) | Use `samtools faidx` to create index |
+| SNP | VCF with tabix index (`.tbi`) | Filters for B6 vs Cast **different** genotypes only |
+
+## Test Results (21 genes, mm10)
+
+| Metric | Value |
+|--------|-------|
+| Total probes designed | 41,118 |
+| After quality filtering | 12,603 (30.7%) |
+| Probes with ≥5 SNPs | 129 |
+| SNP analysis time | ~2 min (tabix) |
+
+### Validation
+
+Probes at identical genomic positions produce identical results:
+- Same sequences, dG37 scores, and filter outcomes
+- Example: Mecp2 @ chr74027166 → `ATCTTTCTCTCTGCCTTGTCTGCCTGCTCCC`, dG37=-42.978
+
+### SNP Detection Comparison (vs old custom .snps format)
+
+| SNP Count | Old Format | New VCF |
+|-----------|------------|---------|
+| ≥5 SNPs | 78 probes | **129 probes** (+65%) |
+
+The VCF-based approach finds more high-SNP probes by properly filtering for B6 vs Cast genotype differences.
+
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Main pipeline orchestration |
-| `config.py` | Configuration parameters and gene lists |
-| `gene_fetcher.py` | Extracts gene sequences from GTF/FASTA |
-| `snp_analyzer.py` | SNP coverage analysis for RT regions |
-| `output_generator.py` | CSV/FASTA output generation |
-| `probe_picker_gui.py` | Interactive GUI for primer selection |
-| `top_probes_blast_analysis.py` | BLAST result parsing and filtering |
-| `extract_rt_sequences.py` | RT region sequence extraction utility |
-| `utils/oligostan_core.py` | Core Oligostan algorithm |
-| `utils/thermodynamics.py` | dG37 calculations |
-| `utils/filters.py` | GC, PNAS, dustmasker filters |
+| `main.py` | Pipeline orchestration |
+| `config.py` | All configuration parameters |
+| `gene_fetcher.py` | GTF/FASTA parsing (gzip support) |
+| `snp_analyzer.py` | VCF-based SNP analysis with pysam/tabix |
+| `probe_picker_gui.py` | Interactive primer selection |
+| `top_probes_blast_analysis.py` | BLAST result filtering |
 
 ## Citation
 
-The thermodynamic design principles are based on the Oligostan algorithm from:
-> Tsanov, Nikolay, et al. "smiFISH and FISH-Quant – a Flexible Single RNA Detection Approach with Super-Resolution Capability." *Nucleic Acids Research* 44, no. 22 (2016): e165. https://doi.org/10.1093/NAR/GKW784
+Thermodynamic design based on:
+> Tsanov et al. "smiFISH and FISH-Quant" *Nucleic Acids Research* 44(22):e165, 2016. https://doi.org/10.1093/NAR/GKW784
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License

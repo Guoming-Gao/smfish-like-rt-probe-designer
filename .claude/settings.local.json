@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gunzip:*)",
+      "Bash(zcat:*)",
+      "Bash(ls:*)",
+      "Bash(python main.py:*)",
+      "Bash(pip install:*)",
+      "Bash(sort:*)",
+      "Bash(python:*)"
+    ]
+  }
+}

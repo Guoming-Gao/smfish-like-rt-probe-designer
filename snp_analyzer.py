@@ -1,4 +1,4 @@
-# snp_analyzer.py - SNP Coverage Analysis (Local Files Only)
+# snp_analyzer.py - SNP Coverage Analysis (VCF format with pysam/tabix)
 
 import pandas as pd
 import numpy as np
@@ -6,85 +6,126 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import track
 
+try:
+    import pysam
+    PYSAM_AVAILABLE = True
+except ImportError:
+    PYSAM_AVAILABLE = False
+
 console = Console()
 
 
 class SNPCoverageAnalyzer:
-    """Analyze SNP coverage using local B6xCast SNP file"""
+    """Analyze SNP coverage using VCF file with tabix index (B6 vs Cast differences)"""
 
     def __init__(self, config):
         self.config = config
         self.rt_coverage_length = config.get("rt_coverage_downstream", 100)
         self.snp_file_path = config.get("snp_file_path", "")
+        self.b6_sample = config.get("vcf_b6_sample", "C57BL_6NJ")
+        self.cast_sample = config.get("vcf_cast_sample", "CAST_EiJ")
 
-        # Load SNP database
-        self.snp_database = {}
-        self.load_snp_database()
+        # VCF file handle and sample indices
+        self.vcf_file = None
+        self.b6_idx = None
+        self.cast_idx = None
+        self.samples = []
 
-    def load_snp_database(self):
-        """Load B6xCast SNP file"""
+        # Initialize VCF connection
+        self._init_vcf()
+
+    def _init_vcf(self):
+        """Initialize VCF file with tabix"""
+        if not PYSAM_AVAILABLE:
+            console.print("[red]pysam not installed. Run: pip install pysam[/red]")
+            return
+
         if not self.snp_file_path or not Path(self.snp_file_path).exists():
-            console.print(f"[red]SNP file not found: {self.snp_file_path}[/red]")
+            console.print(f"[red]VCF file not found: {self.snp_file_path}[/red]")
+            return
+
+        # Check for tabix index
+        tbi_path = f"{self.snp_file_path}.tbi"
+        if not Path(tbi_path).exists():
+            console.print(f"[red]Tabix index not found: {tbi_path}[/red]")
+            console.print("[yellow]Run: tabix -p vcf {self.snp_file_path}[/yellow]")
             return
 
         try:
-            snps = self._parse_snp_file(self.snp_file_path)
-            console.print(f"✅ Loaded {len(snps)} B6xCast SNPs")
+            self.vcf_file = pysam.TabixFile(self.snp_file_path)
 
-            # Organize by chromosome
-            for snp in snps:
-                chr_name = snp["chromosome"]
-                if chr_name not in self.snp_database:
-                    self.snp_database[chr_name] = []
-                self.snp_database[chr_name].append(snp)
+            # Parse header to get sample indices
+            self._parse_vcf_header()
 
-            # Sort by position
-            for chr_name in self.snp_database:
-                self.snp_database[chr_name].sort(key=lambda x: x["start"])
-
-            console.print(f"Organized SNPs across {len(self.snp_database)} chromosomes")
+            if self.b6_idx is not None and self.cast_idx is not None:
+                console.print(f"[green]✅ VCF loaded: {self.snp_file_path}[/green]")
+                console.print(f"[cyan]   B6 sample: {self.b6_sample} (column {self.b6_idx})[/cyan]")
+                console.print(f"[cyan]   Cast sample: {self.cast_sample} (column {self.cast_idx})[/cyan]")
+            else:
+                console.print(f"[red]Could not find B6/Cast samples in VCF[/red]")
 
         except Exception as e:
-            console.print(f"[red]Error loading SNP database: {str(e)}[/red]")
-            self.snp_database = {}
+            console.print(f"[red]Error loading VCF: {str(e)}[/red]")
+            import traceback
+            traceback.print_exc()
+            self.vcf_file = None
 
-    def _parse_snp_file(self, file_path):
-        """Parse B6xCast SNP file"""
-        snps = []
-
+    def _parse_vcf_header(self):
+        """Parse VCF header to find sample column indices"""
         try:
-            with open(file_path, "r") as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
+            # Get header from VCF
+            header_line = None
+            for line in self.vcf_file.header:
+                line = line.decode() if isinstance(line, bytes) else line
+                if line.startswith("#CHROM"):
+                    header_line = line
+                    break
 
-                    try:
-                        tokens = line.split("\t")
-                        if len(tokens) >= 4:
-                            snps.append(
-                                {
-                                    "chromosome": tokens[0],
-                                    "start": int(tokens[1]),
-                                    "end": int(tokens[2]),
-                                    "genotype": tokens[3],
-                                    "line_number": line_num,
-                                }
-                            )
-                    except (ValueError, IndexError):
-                        continue
+            if not header_line:
+                console.print("[red]No #CHROM header line found in VCF[/red]")
+                return
+
+            # Parse header columns
+            columns = header_line.strip().split("\t")
+            # Standard VCF columns: CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO, FORMAT, then samples
+            # Sample columns start at index 9
+            self.samples = columns[9:]
+
+            # Find B6 and Cast indices
+            if self.b6_sample in self.samples:
+                self.b6_idx = self.samples.index(self.b6_sample)
+            else:
+                console.print(f"[red]B6 sample '{self.b6_sample}' not found in VCF[/red]")
+                console.print(f"[yellow]Available samples: {', '.join(self.samples[:10])}...[/yellow]")
+
+            if self.cast_sample in self.samples:
+                self.cast_idx = self.samples.index(self.cast_sample)
+            else:
+                console.print(f"[red]Cast sample '{self.cast_sample}' not found in VCF[/red]")
 
         except Exception as e:
-            console.print(f"[red]Error reading SNP file: {e}[/red]")
+            console.print(f"[red]Error parsing VCF header: {e}[/red]")
 
-        return snps
+    def load_snp_database(self):
+        """Legacy method - VCF uses on-demand queries, no preloading needed"""
+        pass  # VCF queries are done on-demand via tabix
 
     def analyze_probes(self, probe_list):
         """Analyze SNP coverage for all probes"""
-        if not self.snp_database:
+        if not self.vcf_file or self.b6_idx is None or self.cast_idx is None:
             console.print(
-                "[yellow]No SNP database loaded, skipping SNP analysis[/yellow]"
+                "[yellow]VCF not properly loaded, skipping SNP analysis[/yellow]"
             )
+            # Return probes with empty SNP fields
+            for probe in probe_list:
+                probe.update({
+                    "RT_Coverage_Start": 0,
+                    "RT_Coverage_End": 0,
+                    "RT_Coverage_Strand": ".",
+                    "SNPs_Covered_Count": 0,
+                    "SNPs_Covered_Positions": "",
+                    "SNPs_Covered_Types": "",
+                })
             return probe_list
 
         console.print(
@@ -96,8 +137,8 @@ class SNPCoverageAnalyzer:
                 # Calculate RT coverage region in genomic coordinates
                 rt_coverage = self._calculate_rt_coverage_coords(probe)
 
-                # Find SNPs in RT region
-                covered_snps = self._find_snps_in_region(
+                # Find SNPs in RT region (B6 vs Cast differences)
+                covered_snps = self._find_snps_in_region_vcf(
                     chromosome=rt_coverage["chromosome"],
                     start=rt_coverage["start"],
                     end=rt_coverage["end"],
@@ -111,7 +152,7 @@ class SNPCoverageAnalyzer:
                         "RT_Coverage_Strand": rt_coverage["strand"],
                         "SNPs_Covered_Count": len(covered_snps),
                         "SNPs_Covered_Positions": ",".join(
-                            [f"{s['chromosome']}:{s['start']}" for s in covered_snps]
+                            [f"{s['chromosome']}:{s['pos']}" for s in covered_snps]
                         ),
                         "SNPs_Covered_Types": ",".join(
                             [s["genotype"] for s in covered_snps]
@@ -157,18 +198,82 @@ class SNPCoverageAnalyzer:
             "strand": rt_strand,
         }
 
-    def _find_snps_in_region(self, chromosome, start, end):
-        """Find SNPs overlapping with region"""
-        # Handle chromosome naming (with or without 'chr' prefix)
-        chr_variants = [chromosome, f"chr{chromosome}", chromosome.replace("chr", "")]
-
+    def _find_snps_in_region_vcf(self, chromosome, start, end):
+        """Find SNPs in region where B6 and Cast have different genotypes"""
         overlapping_snps = []
-        for chr_name in chr_variants:
-            if chr_name in self.snp_database:
-                chr_snps = self.snp_database[chr_name]
-                for snp in chr_snps:
-                    if snp["start"] <= end and snp["end"] >= start:
-                        overlapping_snps.append(snp)
-                break  # Found the right chromosome format
+
+        # VCF uses chromosome names without 'chr' prefix
+        vcf_chrom = chromosome.replace("chr", "") if chromosome.startswith("chr") else chromosome
+
+        try:
+            # Query VCF using tabix
+            # pysam.TabixFile.fetch returns iterator of lines
+            for line in self.vcf_file.fetch(vcf_chrom, start - 1, end):  # tabix uses 0-based
+                line = line.decode() if isinstance(line, bytes) else line
+                fields = line.strip().split("\t")
+
+                if len(fields) < 10:
+                    continue
+
+                chrom = fields[0]
+                pos = int(fields[1])
+                ref = fields[3]
+                alt = fields[4]
+
+                # Get sample genotypes (fields[9:] are samples)
+                sample_fields = fields[9:]
+                if len(sample_fields) <= max(self.b6_idx, self.cast_idx):
+                    continue
+
+                b6_data = sample_fields[self.b6_idx]
+                cast_data = sample_fields[self.cast_idx]
+
+                # Parse genotypes
+                b6_gt = self._parse_genotype(b6_data, ref, alt)
+                cast_gt = self._parse_genotype(cast_data, ref, alt)
+
+                # Skip if either genotype is missing
+                if b6_gt is None or cast_gt is None:
+                    continue
+
+                # Only include SNPs where B6 and Cast are DIFFERENT
+                if b6_gt != cast_gt:
+                    overlapping_snps.append({
+                        "chromosome": f"chr{chrom}",  # Add chr prefix for consistency
+                        "pos": pos,
+                        "ref": ref,
+                        "alt": alt,
+                        "b6_gt": b6_gt,
+                        "cast_gt": cast_gt,
+                        "genotype": f"{b6_gt},{cast_gt}",  # B6/Cast alleles
+                    })
+
+        except ValueError as e:
+            # Chromosome not in VCF (e.g., chrM, chrY)
+            pass
+        except Exception as e:
+            console.print(f"[yellow]Warning: Error querying {vcf_chrom}:{start}-{end}: {e}[/yellow]")
 
         return overlapping_snps
+
+    def _parse_genotype(self, sample_data, ref, alt):
+        """Parse VCF genotype field to actual alleles"""
+        # Format: GT:GQ:DP:... (GT is first field)
+        gt_field = sample_data.split(":")[0]
+
+        # Missing data
+        if "." in gt_field:
+            return None
+
+        # Parse allele indices
+        try:
+            alleles = [ref] + alt.split(",")  # Handle multi-allelic
+            indices = [int(i) for i in gt_field.replace("|", "/").split("/")]
+            return "/".join(alleles[i] for i in indices)
+        except (ValueError, IndexError):
+            return None
+
+    def __del__(self):
+        """Clean up VCF file handle"""
+        if self.vcf_file:
+            self.vcf_file.close()
