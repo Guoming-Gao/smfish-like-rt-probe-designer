@@ -7,29 +7,6 @@ import os
 
 FISH_RT_CONFIG = {
     # INPUT SETTINGS
-    "gene_list": [
-        "Atrx",
-        "Diaph2",
-        "Gpc4",
-        "Hdac3",
-        "Hnrnpu",
-        "Kdm5c",
-        "Kdm6a",
-        "Mecp2",
-        "Mid1",
-        "Nanog",
-        "Pir",
-        "Pou5f1",
-        "Rbmx",
-        "Rlim",
-        "Rps6ka3",
-        "Rps6ka6",
-        "Smc1a",
-        "Spen",
-        "Tsix",
-        "Xist",
-        "Zfp42",
-    ],
     "transcript_selection": "longest",
     "output_directory": "/Users/gmgao/Dropbox/Caltech_PostDoc_GuttmanLab/constructs_and_smiFISH/smFISH_like_focusedRT-XCI",
     # LOCAL FILE PATHS (YOUR SERVER FILES)
@@ -39,11 +16,12 @@ FISH_RT_CONFIG = {
     # VCF SAMPLE NAMES (for B6 x Cast SNP filtering)
     "vcf_b6_sample": "C57BL_6NJ",  # B6 reference strain
     "vcf_cast_sample": "CAST_EiJ",  # Cast strain for allelic analysis
-    # RT COVERAGE SETTINGS (UNCHANGED as requested)
-    "rt_coverage_downstream": 100,  # nt downstream in RNA 5'→3' direction
+    # RT COVERAGE SETTINGS - RT extends 3'→5' on mRNA (upstream direction)
+    "rt_coverage_downstream": 200,  # nt that RT extends (based on experimental data showing >200nt products)
     "include_probe_in_coverage": False,  # Strictly downstream
+    "extract_rt_sequence": True,  # Extract RT product sequence for output
     # RTBC BARCODE SETTINGS
-    "add_rtbc_barcode": True,
+    "add_rtbc_barcode": False,  # Changed: RTBC now added as final post-processing step
     "rtbc_sequence": "/5Phos/TGACTTGAGGAT",
     # OLIGOSTAN PARAMETERS
     "fixed_dg37_value": -32.0,
@@ -58,13 +36,37 @@ FISH_RT_CONFIG = {
     "pnas_filter_rules": [1, 2, 4],  # 3 rules is often enough
     "use_dustmasker": True,  # ENABLED (FIXED)
     "max_masked_percent": 0.1,
-    # SNP COVERAGE FILTERING (FIXED - missing parameter added)
-    "min_snp_coverage_for_final": 5,  # Minimum SNPs for HIGH_SNP output file
+    # SNP COVERAGE FILTERING
+    # "min_snp_coverage_for_final": 5,  # DEPRECATED: Threshold for HIGH_SNP output (now redundant)
+
+    "max_homopolymer_length": 4,  # Consecutive bases allowed (e.g. 4 means AAAAA is blocked)
+    # PROBE SELECTION SETTINGS
+    "max_probes_per_gene": 200,       # Maximum probes per gene (was hardcoded 50)
+    "min_snps_for_selection": 3,      # Minimum SNPs to include probe in selection
     "generate_all_probes_file": False,  # FIXED: Skip ALL.csv generation
     "focus_on_high_quality_only": True,  # FIXED: Only process filtered probes
     # FASTA OUTPUT SETTINGS
     "generate_blast_fasta": True,  # Generate FASTA for manual BLAST
     "fasta_description_format": "detailed",  # 'simple' or 'detailed'
+
+    # =========================================================================
+    # SYNTHESIS OUTPUT SETTINGS
+    # =========================================================================
+    # Default number of probes per gene for final synthesis output
+    "default_probes_per_gene": 3,
+
+    # Per-gene probe count overrides (use this for custom counts per gene)
+    # Example: {"Xist": 20, "Tsix": 10} means 20 probes for Xist, 10 for Tsix, default for others
+    "probes_per_gene_override": {},
+
+    # =========================================================================
+    # LOCAL BLAST SETTINGS
+    # =========================================================================
+    "run_local_blast": True,  # Set to False to skip BLAST (faster, but no specificity check)
+    "blast_database_path": "/Volumes/guttman/genomes/mm10/fasta/blastdb/mm10_blastdb",  # Path to local BLAST database
+    "blast_min_identity": 90.0,  # Minimum % identity for a hit to count
+    "blast_max_evalue": 0.001,  # Maximum E-value for a hit
+    "filter_unique_blast_hits": True,  # Only keep probes with exactly 1 BLAST hit
 }
 
 # =============================================================================
@@ -91,34 +93,8 @@ DG37_VALUES = {
 }
 
 # =============================================================================
-# TEST GENE SETS (unchanged as requested)
+# TEST GENE SETS (REMOVED - Use --genes argument)
 # =============================================================================
-
-TEST_GENES_21 = [
-    "Atrx",
-    "Diaph2",
-    "Gpc4",
-    "Hdac3",
-    "Hnrnpu",
-    "Kdm5c",
-    "Kdm6a",
-    "Mecp2",
-    "Mid1",
-    "Nanog",
-    "Pir",
-    "Pou5f1",
-    "Rbmx",
-    "Rlim",
-    "Rps6ka3",
-    "Rps6ka6",
-    "Smc1a",
-    "Spen",
-    "Tsix",
-    "Xist",
-    "Zfp42",
-]
-
-TEST_GENES_SMALL = ["Nanog", "Pou5f1", "Sox2"]
 
 # =============================================================================
 # DEMO GENE COORDINATES (mm10) - For when local files aren't accessible

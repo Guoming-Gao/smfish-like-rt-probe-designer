@@ -9,20 +9,36 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 
-def select_top_probes(df, probes_per_gene):
-    """Sort and select top N probes per gene"""
+def select_top_probes(df, default_probes_per_gene, probes_per_gene_override=None):
+    """
+    Sort and select top N probes per gene.
+
+    Args:
+        df: DataFrame with probe data
+        default_probes_per_gene: Default number of probes to select per gene
+        probes_per_gene_override: Dict mapping gene names to specific counts
+                                  e.g., {"Xist": 20, "Tsix": 10}
+    """
+    if probes_per_gene_override is None:
+        probes_per_gene_override = {}
+
     # Sort probes by selection criteria
     df_sorted = df.sort_values(
-        ["SNPs_Covered_Count", "NbOfPNAS", "dGScore"],
+        ["SNP_Count", "NbOfPNAS", "dGScore"],
         ascending=[False, False, False],
     )
 
-    # Select top probes per gene
-    top_probes = df_sorted.groupby("GeneName").head(probes_per_gene).reset_index(drop=True)
+    # Select top probes per gene with per-gene override support
+    selected_probes = []
+    for gene_name, gene_df in df_sorted.groupby("GeneName"):
+        n_probes = probes_per_gene_override.get(gene_name, default_probes_per_gene)
+        selected_probes.append(gene_df.head(n_probes))
 
-    # Sort final output by GeneName, then SNPs_Covered_Count (desc), then NbOfPNAS (desc)
+    top_probes = pd.concat(selected_probes, ignore_index=True)
+
+    # Sort final output by GeneName, then SNP_Count (desc), then NbOfPNAS (desc)
     top_probes = top_probes.sort_values(
-        ["GeneName", "SNPs_Covered_Count", "NbOfPNAS"],
+        ["GeneName", "SNP_Count", "NbOfPNAS"],
         ascending=[True, False, False],
     )
 
@@ -37,12 +53,12 @@ def generate_fasta(df, output_file):
         gene_name = row["GeneName"]
 
         # Use probe sequence only (no RTBC for BLAST)
-        sequence = row["Seq"]
+        sequence = row["Probe_Seq"]
         seq_type = "probe_only"
 
         # Create descriptive FASTA header
-        probe_size = row.get("ProbeSize", len(row["Seq"]))
-        snp_count = row.get("SNPs_Covered_Count", 0)
+        probe_size = row.get("Probe_Length", len(row["Probe_Seq"]))
+        snp_count = row.get("SNP_Count", 0)
         region_type = row.get("RegionType", "unknown")
         pnas_score = row.get("NbOfPNAS", 0)
 
@@ -63,13 +79,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Selection Criteria (in order):
-  1. SNPs_Covered_Count (descending) - Higher SNP coverage first
+  1. SNP_Count (descending) - Higher SNP coverage first
   2. NbOfPNAS (descending) - Better PNAS score first
   3. dGScore (descending) - Better thermodynamic score first
 
 Example:
-  python probe_picker_cli.py -i FISH_RT_probes_FILTERED.csv -n 10
-  python probe_picker_cli.py -i probes.csv -o MY_TOP_PROBES -n 5
+  python probe_picker_cli.py -i FISH_RT_probes_FINAL_SELECTION.csv -n 10
+  python probe_picker_cli.py -i candidates.csv -o MY_TOP_PROBES -n 5
 """
     )
 
@@ -117,7 +133,7 @@ Example:
     print(f"\nSelected probes per gene:")
     gene_counts = top_probes["GeneName"].value_counts().sort_index()
     for gene, count in gene_counts.items():
-        avg_snps = top_probes[top_probes["GeneName"] == gene]["SNPs_Covered_Count"].mean()
+        avg_snps = top_probes[top_probes["GeneName"] == gene]["SNP_Count"].mean()
         avg_pnas = top_probes[top_probes["GeneName"] == gene]["NbOfPNAS"].mean()
         print(f"  {gene}: {count} probes (avg SNPs: {avg_snps:.1f}, avg PNAS: {avg_pnas:.1f}/5)")
 
@@ -139,11 +155,11 @@ Example:
     print(f"  Input probes: {len(df)}")
     print(f"  Selected probes: {len(top_probes)}")
     print(f"  Reduction: {(1 - len(top_probes)/len(df))*100:.1f}%")
-    print(f"  Average SNPs per probe: {top_probes['SNPs_Covered_Count'].mean():.1f}")
+    print(f"  Average SNPs per probe: {top_probes['SNP_Count'].mean():.1f}")
     print(f"  Average PNAS score: {top_probes['NbOfPNAS'].mean():.1f}/5")
 
     # SNP coverage distribution
-    snp_dist = top_probes["SNPs_Covered_Count"].value_counts().sort_index()
+    snp_dist = top_probes["SNP_Count"].value_counts().sort_index()
     print(f"\n  SNP coverage distribution:")
     for snps, count in snp_dist.items():
         print(f"    {snps} SNPs: {count} probes")

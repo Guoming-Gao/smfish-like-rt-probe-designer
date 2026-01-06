@@ -2,9 +2,11 @@
 
 import pandas as pd
 import numpy as np
+import subprocess
 from pathlib import Path
 from rich.console import Console
 from rich.progress import track
+from Bio.Seq import Seq
 
 try:
     import pysam
@@ -24,6 +26,10 @@ class SNPCoverageAnalyzer:
         self.snp_file_path = config.get("snp_file_path", "")
         self.b6_sample = config.get("vcf_b6_sample", "C57BL_6NJ")
         self.cast_sample = config.get("vcf_cast_sample", "CAST_EiJ")
+
+        # For RT sequence extraction
+        self.genome_fasta_path = config.get("local_genome_fasta_path", "")
+        self.extract_rt_sequence = config.get("extract_rt_sequence", True)
 
         # VCF file handle and sample indices
         self.vcf_file = None
@@ -119,12 +125,12 @@ class SNPCoverageAnalyzer:
             # Return probes with empty SNP fields
             for probe in probe_list:
                 probe.update({
-                    "RT_Coverage_Start": 0,
-                    "RT_Coverage_End": 0,
-                    "RT_Coverage_Strand": ".",
-                    "SNPs_Covered_Count": 0,
-                    "SNPs_Covered_Positions": "",
-                    "SNPs_Covered_Types": "",
+                    "RT_Region_Start": 0,
+                    "RT_Region_End": 0,
+                    "SNP_Count": 0,
+                    "SNPs_Positions": "",
+                    "SNPs_Types": "",
+                    "RT_Product_Seq": "",
                 })
             return probe_list
 
@@ -144,19 +150,29 @@ class SNPCoverageAnalyzer:
                     end=rt_coverage["end"],
                 )
 
+                # Extract RT product sequence if enabled
+                rt_product_seq = ""
+                if self.extract_rt_sequence and self.genome_fasta_path:
+                    rt_product_seq = self._extract_rt_sequence(
+                        chromosome=rt_coverage["chromosome"],
+                        start=rt_coverage["start"],
+                        end=rt_coverage["end"],
+                        target_strand=probe["Target_Strand"]
+                    )
+
                 # Update probe with SNP information
                 probe.update(
                     {
-                        "RT_Coverage_Start": rt_coverage["start"],
-                        "RT_Coverage_End": rt_coverage["end"],
-                        "RT_Coverage_Strand": rt_coverage["strand"],
-                        "SNPs_Covered_Count": len(covered_snps),
-                        "SNPs_Covered_Positions": ",".join(
+                        "RT_Region_Start": rt_coverage["start"],
+                        "RT_Region_End": rt_coverage["end"],
+                        "SNP_Count": len(covered_snps),
+                        "SNPs_Positions": ",".join(
                             [f"{s['chromosome']}:{s['pos']}" for s in covered_snps]
                         ),
-                        "SNPs_Covered_Types": ",".join(
+                        "SNPs_Types": ",".join(
                             [s["genotype"] for s in covered_snps]
                         ),
+                        "RT_Product_Seq": rt_product_seq,
                     }
                 )
 
@@ -164,31 +180,38 @@ class SNPCoverageAnalyzer:
                 console.print(f"[red]Error analyzing SNP coverage: {e}[/red]")
                 probe.update(
                     {
-                        "RT_Coverage_Start": 0,
-                        "RT_Coverage_End": 0,
-                        "RT_Coverage_Strand": ".",
-                        "SNPs_Covered_Count": 0,
-                        "SNPs_Covered_Positions": "",
-                        "SNPs_Covered_Types": "",
+                        "RT_Region_Start": 0,
+                        "RT_Region_End": 0,
+                        "SNP_Count": 0,
+                        "SNPs_Positions": "",
+                        "SNPs_Types": "",
+                        "RT_Product_Seq": "",
                     }
                 )
 
         return probe_list
 
     def _calculate_rt_coverage_coords(self, probe):
-        """Calculate RT coverage region (strand-aware)"""
+        """Calculate RT coverage region (strand-aware)
+
+        RT extends 3'→5' on mRNA template:
+        - For + strand genes: RT extends UPSTREAM (smaller genomic coords)
+        - For - strand genes: RT extends DOWNSTREAM (larger genomic coords)
+        """
         target_strand = probe["Target_Strand"]
-        probe_start = probe["theStartPos"]
-        probe_end = probe["theEndPos"]
+        probe_start = probe["Probe_Start"]
+        probe_end = probe["Probe_End"]
         chromosome = probe["Chromosome"]
 
         if target_strand == "+":
-            rt_start = probe_end + 1
-            rt_end = rt_start + self.rt_coverage_length - 1
-            rt_strand = "+"
-        else:
+            # RT extends UPSTREAM (3'→5' on mRNA = smaller genomic coords)
             rt_end = probe_start - 1
             rt_start = rt_end - self.rt_coverage_length + 1
+            rt_strand = "+"
+        else:
+            # RT extends DOWNSTREAM (3'→5' on mRNA = larger genomic coords for - strand)
+            rt_start = probe_end + 1
+            rt_end = rt_start + self.rt_coverage_length - 1
             rt_strand = "-"
 
         return {
@@ -272,6 +295,50 @@ class SNPCoverageAnalyzer:
             return "/".join(alleles[i] for i in indices)
         except (ValueError, IndexError):
             return None
+
+    def _extract_rt_sequence(self, chromosome, start, end, target_strand):
+        """
+        Extract RT product sequence from genome.
+
+        The RT product (cDNA) is complementary to the mRNA, so:
+        - For + strand genes: RT product is on - strand (reverse complement of genomic)
+        - For - strand genes: RT product is on + strand (same as genomic sequence)
+
+        Returns the sequence in 5'→3' direction of the RT product.
+        """
+        try:
+            # Ensure valid coordinates
+            if start < 1 or end < start:
+                return ""
+
+            region = f"{chromosome}:{start}-{end}"
+            cmd = ["samtools", "faidx", self.genome_fasta_path, region]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+            lines = result.stdout.strip().split("\n")
+            if len(lines) < 2:
+                return ""
+
+            genomic_sequence = "".join(lines[1:]).upper()
+
+            # RT product (cDNA) is complementary to mRNA
+            # For + strand gene: mRNA is same as genomic + strand, RT product is its complement
+            # For - strand gene: mRNA is reverse complement of genomic, RT product is its complement
+            if target_strand == "+":
+                # RT product is reverse complement of genomic sequence
+                rt_product = str(Seq(genomic_sequence).reverse_complement())
+            else:
+                # RT product is same as genomic sequence (5'→3')
+                rt_product = genomic_sequence
+
+            return rt_product
+
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]Warning: Failed to extract RT sequence for {chromosome}:{start}-{end}[/yellow]")
+            return ""
+        except Exception as e:
+            console.print(f"[yellow]Warning: Error extracting RT sequence: {e}[/yellow]")
+            return ""
 
     def __del__(self):
         """Clean up VCF file handle"""

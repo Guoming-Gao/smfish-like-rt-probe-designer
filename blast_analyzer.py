@@ -59,11 +59,10 @@ class BLASTSpecificityAnalyzer:
             for probe in probe_list:
                 probe.update(
                     {
-                        "NumberOfHits": 0,
-                        "PercentAlignment": 0,
-                        "UniqueHitName": "",
-                        "BLAST_Start": 0,
-                        "BLAST_End": 0,
+                        "BLAST_Hits": 0,
+                        "BLAST_Identity": 0,
+                        "BLAST_Unique": False,
+                        "BLAST_Hit_Name": "",
                     }
                 )
             return probe_list
@@ -76,12 +75,12 @@ class BLASTSpecificityAnalyzer:
         for i, probe in enumerate(probe_list):
             # Use probe sequence as ID for matching later
             probe_id = f"probe_{i}_{probe['GeneName']}"  # Unique identifier
-            sequence = probe["Seq"]
+            sequence = probe["Probe_Seq"]
 
             record = SeqRecord(
                 Seq(sequence),
                 id=probe_id,
-                description=f"Gene:{probe['GeneName']} Size:{probe['ProbeSize']}",
+                description=f"Gene:{probe['GeneName']} Size:{probe['Probe_Length']}",
             )
             records.append(record)
 
@@ -151,20 +150,28 @@ class BLASTSpecificityAnalyzer:
 
     def parse_blast_results_smfish(self, blast_text):
         """
-        EXACT COPY of parse_blast_results from smFISH_blast_analysis.py
+        Parse BLAST results from local blastn output.
+        Handles both local BLAST format (Query=) and NCBI web format (Query #N:)
         """
-        # Split by queries
-        queries = re.split(r"Query #\d+: ", blast_text)[1:]  # skip first empty split
+        # Try local BLAST format first (Query=)
+        queries = re.split(r'\nQuery=\s*', blast_text)
+        if len(queries) <= 1:
+            # Try NCBI web format (Query #N:)
+            queries = re.split(r'Query #\d+:\s*', blast_text)
+
+        # Skip first empty split
+        queries = queries[1:] if len(queries) > 1 else []
         records = []
 
+        console.print(f"Found {len(queries)} query results to parse")
+
         for query in queries:
-            # Extract probe name (first word in the query)
-            probe_name_search = re.search(r"^(\S+)", query)
+            # Extract probe name from local BLAST format: "probe_0_Nanog Gene:Nanog Size:27"
+            probe_name_search = re.search(r'^(\S+)', query)
             probe_name = probe_name_search.group(1) if probe_name_search else None
 
-            # CORRECTED: Count alignment sections starting with ">"
-            # This counts actual genomic hits, not table entries
-            alignment_headers = re.findall(r"^>([^\n]+)", query, re.MULTILINE)
+            # Count alignment sections starting with ">"
+            alignment_headers = re.findall(r'^>([^\n]+)', query, re.MULTILINE)
             num_hits = len(alignment_headers)
 
             # Extract unique hit name if only one hit
@@ -172,19 +179,19 @@ class BLASTSpecificityAnalyzer:
             if num_hits == 1:
                 unique_hit_name = alignment_headers[0].strip()
 
-            # Extract start and end positions (from first alignment)
-            start_end_search = re.search(r"Range 1: (\d+) to (\d+)", query)
-            start = int(start_end_search.group(1)) if start_end_search else None
-            end = int(start_end_search.group(2)) if start_end_search else None
+            # Extract subject start/end positions from Sbjct line
+            sbjct_search = re.search(r'Sbjct\s+(\d+)\s+[A-Z]+\s+(\d+)', query)
+            start = int(sbjct_search.group(1)) if sbjct_search else None
+            end = int(sbjct_search.group(2)) if sbjct_search else None
 
-            # Extract percentage identity
-            perc_identity_search = re.search(r"Identities:\s*\d+/\d+\((\d+)%\)", query)
+            # Extract percentage identity from "Identities = X/Y (Z%)"
+            perc_identity_search = re.search(r'Identities\s*=\s*\d+/\d+\s*\((\d+)%\)', query)
             perc_identity = (
                 int(perc_identity_search.group(1)) if perc_identity_search else None
             )
 
-            # Extract probe sequence (longest query sequence from alignment)
-            query_seqs = re.findall(r"Query\s+\d+\s+([A-Z]+)\s+\d+", query)
+            # Extract probe sequence from Query line
+            query_seqs = re.findall(r'Query\s+\d+\s+([A-Z]+)\s+\d+', query)
             probe_seq = max(query_seqs, key=len) if query_seqs else None
 
             records.append(
@@ -216,28 +223,37 @@ class BLASTSpecificityAnalyzer:
                     continue
 
         # Update probes with BLAST results
+        unique_count = 0
+        multi_count = 0
         for i, probe in enumerate(probe_list):
             if i in blast_lookup:
                 blast_result = blast_lookup[i]
+                num_hits = blast_result["NumberOfHits"] or 0
+                is_unique = num_hits == 1
+                if is_unique:
+                    unique_count += 1
+                elif num_hits > 1:
+                    multi_count += 1
                 probe.update(
                     {
-                        "NumberOfHits": blast_result["NumberOfHits"] or 0,
-                        "PercentAlignment": blast_result["PercentAlignment"] or 0,
-                        "UniqueHitName": blast_result["UniqueHitName"] or "",
-                        "BLAST_Start": blast_result["Start"] or 0,
-                        "BLAST_End": blast_result["End"] or 0,
+                        "BLAST_Hits": num_hits,
+                        "BLAST_Identity": blast_result["PercentAlignment"] or 0,
+                        "BLAST_Unique": is_unique,
+                        "BLAST_Hit_Name": blast_result["UniqueHitName"] or "",
                     }
                 )
             else:
                 # No BLAST result found
                 probe.update(
                     {
-                        "NumberOfHits": 0,
-                        "PercentAlignment": 0,
-                        "UniqueHitName": "No_BLAST_result",
-                        "BLAST_Start": 0,
-                        "BLAST_End": 0,
+                        "BLAST_Hits": 0,
+                        "BLAST_Identity": 0,
+                        "BLAST_Unique": False,
+                        "BLAST_Hit_Name": "No_BLAST_result",
                     }
                 )
+
+        console.print(f"  Unique hits (1 target): {unique_count}")
+        console.print(f"  Multiple hits (>1 target): {multi_count}")
 
         return probe_list

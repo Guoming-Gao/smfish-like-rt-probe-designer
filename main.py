@@ -11,11 +11,13 @@ from rich.progress import track
 from rich.console import Console
 
 # Import our modules
-from config import FISH_RT_CONFIG, TEST_GENES_21
+from config import FISH_RT_CONFIG
 from gene_fetcher import GeneSequenceFetcher
 from utils.oligostan_core import design_fish_probes
 from snp_analyzer import SNPCoverageAnalyzer
+from blast_analyzer import BLASTSpecificityAnalyzer
 from output_generator import OutputGenerator
+from utils.filters import is_ok_4_homopolymer
 
 console = Console()
 
@@ -28,52 +30,142 @@ def setup_output_directory(output_path):
     return output_path
 
 
-def apply_early_filtering(probes, config):
-    """Apply stringent filtering early to focus on high-quality probes only"""
+def apply_basic_quality_filtering(probes, config):
+    """
+    Apply basic quality filtering (GC, dustmasker) without selection.
+    PNAS filtering is adaptive and happens after SNP analysis.
+    """
     console.print(
-        f"[cyan]Applying stringent filtering to {len(probes)} probes...[/cyan]"
+        f"[cyan]Applying basic quality filtering to {len(probes)} probes...[/cyan]"
     )
 
     filtered_probes = []
-    filter_stats = {
-        "total": len(probes),
-        "gc_pass": 0,
-        "pnas_pass": 0,
-        "dustmasker_pass": 0,
-        "all_filters_pass": 0,
-    }
 
     for probe in probes:
-        # Check individual filters
         gc_pass = probe["GCFilter"] == 1
-        pnas_pass = probe["PNASFilter"] == 1
-        dustmasker_pass = probe.get("MaskedFilter", 1) == 1  # Default pass if not set
+        dustmasker_pass = probe.get("MaskedFilter", 1) == 1
 
-        # Update statistics
-        if gc_pass:
-            filter_stats["gc_pass"] += 1
-        if pnas_pass:
-            filter_stats["pnas_pass"] += 1
-        if dustmasker_pass:
-            filter_stats["dustmasker_pass"] += 1
+        # Homo-polymer filter
+        homopolymer_pass = is_ok_4_homopolymer(
+            probe["Probe_Seq"],
+            config.get("max_homopolymer_length", 4)
+        )
 
-        # Apply ALL filters (stringent)
-        if gc_pass and pnas_pass and dustmasker_pass:
+        if gc_pass and dustmasker_pass and homopolymer_pass:
             filtered_probes.append(probe)
-            filter_stats["all_filters_pass"] += 1
 
-    # Report filtering statistics
-    console.print(f"[green]Filtering Results:[/green]")
-    console.print(f" Total probes: {filter_stats['total']}")
-    console.print(f" GC filter pass: {filter_stats['gc_pass']}")
-    console.print(f" PNAS filter pass: {filter_stats['pnas_pass']}")
-    console.print(f" Dustmasker pass: {filter_stats['dustmasker_pass']}")
-    console.print(f" All filters pass: {filter_stats['all_filters_pass']}")
-    console.print(
-        f" Retention rate: {filter_stats['all_filters_pass']/filter_stats['total']*100:.1f}%"
-    )
+    console.print(f"[green]Basic Filtering Results:[/green]")
+    console.print(f" Total probes: {len(probes)}")
+    console.print(f" Passed GC + dustmasker: {len(filtered_probes)}")
+    console.print(f" Retention rate: {100*len(filtered_probes)/len(probes):.1f}%")
 
     return filtered_probes
+
+
+def select_top_probes_by_snp(probes, config, max_per_gene=None, min_snps=None):
+    """
+    After SNP analysis, select probes per gene using the logic:
+    min(top N probes, all probes with >= M SNPs)
+
+    Sorted by:
+    1. SNP_Count (desc) - most important for allelic discrimination
+    2. NbOfPNAS (desc) - probe quality
+    3. dGScore (desc) - thermodynamic score
+
+    Also applies adaptive PNAS filtering if needed.
+    """
+    # Use config values or provided overrides
+    max_per_gene = max_per_gene or config.get("max_probes_per_gene", 200)
+    min_snps = min_snps if min_snps is not None else config.get("min_snps_for_selection", 3)
+
+    console.print(
+        f"[cyan]Selecting probes: min(top {max_per_gene}, probes with ≥{min_snps} SNPs)...[/cyan]"
+    )
+
+    # Group probes by gene
+    probes_by_gene = {}
+    for probe in probes:
+        gene = probe["GeneName"]
+        if gene not in probes_by_gene:
+            probes_by_gene[gene] = []
+        probes_by_gene[gene].append(probe)
+
+    # PNAS rule progression: start strict, progressively relax
+    pnas_rule_sets = [
+        [1, 2, 4],       # Strict: 3 rules
+        [1, 2, 3, 4],    # Medium: 4 rules
+        [1, 2, 3, 4, 5], # Relaxed: 5 rules (all)
+        [],              # Last resort: no PNAS filter
+    ]
+
+    selected_probes = []
+    gene_stats = {}
+
+    for gene, gene_probes in probes_by_gene.items():
+        best_probes = []
+        rules_used = None
+
+        for pnas_rules in pnas_rule_sets:
+            # Filter with current PNAS rule set
+            passed = []
+            for probe in gene_probes:
+                if len(pnas_rules) > 0:
+                    pnas_pass = probe["NbOfPNAS"] >= len(pnas_rules)
+                else:
+                    pnas_pass = True  # No PNAS filter
+
+                if pnas_pass:
+                    passed.append(probe)
+
+            if len(passed) >= max_per_gene:
+                best_probes = passed
+                rules_used = pnas_rules
+                break
+            elif len(passed) > len(best_probes):
+                best_probes = passed
+                rules_used = pnas_rules
+
+        # Sort by SNP_Count (primary), then NbOfPNAS, then dGScore
+        best_probes.sort(
+            key=lambda p: (p.get("SNP_Count", 0), p["NbOfPNAS"], p["dGScore"]),
+            reverse=True
+        )
+
+        # Apply new selection logic: min(top N, probes with >= M SNPs)
+        # First, get probes meeting SNP threshold
+        probes_with_snps = [p for p in best_probes if p.get("SNP_Count", 0) >= min_snps]
+        top_n = best_probes[:max_per_gene]
+
+        # Take whichever is smaller (but at least get probes with sufficient SNPs)
+        if len(probes_with_snps) <= len(top_n):
+            selected = probes_with_snps
+        else:
+            selected = top_n
+
+        selected_probes.extend(selected)
+
+        # Stats for reporting
+        avg_snps = sum(p.get("SNP_Count", 0) for p in selected) / len(selected) if selected else 0
+        gene_stats[gene] = {
+            "total": len(gene_probes),
+            "passed_pnas": len(best_probes),
+            "selected": len(selected),
+            "rules_used": rules_used,
+            "avg_snps": avg_snps,
+        }
+
+    # Report statistics
+    console.print(f"[green]Probe Selection Results:[/green]")
+    console.print(f" Max per gene: {max_per_gene}, Min SNPs: {min_snps}")
+    console.print(f" Total genes: {len(probes_by_gene)}")
+    console.print(f" Total selected: {len(selected_probes)}")
+    console.print(f"\n Per-gene breakdown:")
+    for gene in sorted(gene_stats.keys()):
+        stats = gene_stats[gene]
+        rules_str = ",".join(map(str, stats["rules_used"])) if stats["rules_used"] else "none"
+        console.print(f"   {gene}: {stats['selected']}/{stats['passed_pnas']} (PNAS [{rules_str}], avgSNP: {stats['avg_snps']:.1f})")
+
+    return selected_probes
 
 
 def main():
@@ -90,7 +182,14 @@ def main():
         "--output", help="Output directory path (optional, uses config default)"
     )
     parser.add_argument("--genes", nargs="+", help="List of gene names to process")
-    parser.add_argument("--test", action="store_true", help="Run with test gene set")
+    parser.add_argument(
+        "--max-probes", type=int, default=None,
+        help="Max probes per gene (default: config value or 200)"
+    )
+    parser.add_argument(
+        "--min-snps", type=int, default=None,
+        help="Min SNPs for probe selection (default: config value or 3)"
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -104,17 +203,16 @@ def main():
         console.print(f"[green]Using config default output directory[/green]")
 
     # Determine gene list
-    if args.test:
-        gene_list = TEST_GENES_21
-        console.print(f"[yellow]Using test gene set: {len(gene_list)} genes[/yellow]")
-    elif args.genes:
+    if args.genes:
         gene_list = args.genes
         console.print(
-            f"[green]Processing user-specified genes: {len(gene_list)} genes[/green]"
+            f"[green]Processing {len(gene_list)} specified genes[/green]"
         )
     else:
-        gene_list = config["gene_list"]
-        console.print(f"[blue]Using config gene list: {len(gene_list)} genes[/blue]")
+        # Default fallback if no genes provided
+        gene_list = ["Mecp2"]
+        console.print(f"[yellow]No genes specified. Using default: {gene_list}[/yellow]")
+        console.print(f"[dim]Tip: Use --genes GENE1 GENE2 ... to specify your targets[/dim]")
 
     # Setup output directory
     output_path = setup_output_directory(config["output_directory"])
@@ -126,13 +224,14 @@ def main():
     console.print(
         f" Dustmasker: {'✅ Enabled' if config['use_dustmasker'] else '❌ Disabled'}"
     )
-    console.print(f" Min SNP coverage: {config['min_snp_coverage_for_final']}")
     console.print(f" RT coverage: {config['rt_coverage_downstream']} nt downstream")
+    # console.print(f" Min SNP coverage: {config.get('min_snp_coverage_for_final', 'N/A')}")
 
     # Initialize components
     console.print("\n[bold]Initializing pipeline components...[/bold]")
     gene_fetcher = GeneSequenceFetcher(config)
     snp_analyzer = SNPCoverageAnalyzer(config) if config["snp_file_path"] else None
+    blast_analyzer = BLASTSpecificityAnalyzer(config) if config.get("run_local_blast", True) else None
     output_generator = OutputGenerator(config)
 
     # Step 1: Fetch gene sequences
@@ -188,28 +287,28 @@ def main():
 
     console.print(f"[green]Total probes designed: {len(all_probes)}[/green]")
 
-    # Step 3: Early stringent filtering
-    console.print("\n[bold cyan]Step 3: Early stringent filtering...[/bold cyan]")
-    high_quality_probes = apply_early_filtering(all_probes, config)
+    # Step 3: Basic quality filtering (GC + dustmasker only)
+    console.print("\n[bold cyan]Step 3: Basic quality filtering...[/bold cyan]")
+    filtered_probes = apply_basic_quality_filtering(all_probes, config)
 
-    if not high_quality_probes:
+    if not filtered_probes:
         console.print(
-            "[red]No probes passed stringent filtering. Consider relaxing filter parameters.[/red]"
+            "[red]No probes passed basic filtering. Consider relaxing filter parameters.[/red]"
         )
         return
 
-    console.print(f"[green]High-quality probes: {len(high_quality_probes)}[/green]")
+    console.print(f"[green]Filtered probes: {len(filtered_probes)}[/green]")
 
-    # Step 4: SNP analysis (only on filtered probes)
+    # Step 4: SNP analysis on ALL filtered probes (before selection!)
     if snp_analyzer:
         console.print(
-            f"\n[bold cyan]Step 4: SNP analysis (filtered probes only)...[/bold cyan]"
+            f"\n[bold cyan]Step 4: SNP analysis (all filtered probes)...[/bold cyan]"
         )
         try:
-            high_quality_probes = snp_analyzer.analyze_probes(high_quality_probes)
+            filtered_probes = snp_analyzer.analyze_probes(filtered_probes)
 
             # Report SNP coverage statistics
-            snp_counts = [p.get("SNPs_Covered_Count", 0) for p in high_quality_probes]
+            snp_counts = [p.get("SNP_Count", 0) for p in filtered_probes]
             avg_snps = sum(snp_counts) / len(snp_counts) if snp_counts else 0
             max_snps = max(snp_counts) if snp_counts else 0
             high_snp_count = sum(
@@ -232,41 +331,79 @@ def main():
             "\n[yellow]Step 4: SNP analysis skipped (no SNP file configured)[/yellow]"
         )
 
-    # Step 5: Generate focused output files
+    # Step 4b: Select top probes per gene (sorted by SNP_Count!)
+    console.print("\n[bold cyan]Step 4b: Selecting top probes by SNP coverage...[/bold cyan]")
+    high_quality_probes = select_top_probes_by_snp(
+        filtered_probes, config,
+        max_per_gene=args.max_probes,
+        min_snps=args.min_snps
+    )
+    console.print(f"[green]High-quality probes selected: {len(high_quality_probes)}[/green]")
+
+    # Step 5: BLAST specificity analysis (optional)
+    if blast_analyzer:
+        console.print(
+            f"\n[bold cyan]Step 5: BLAST specificity analysis...[/bold cyan]"
+        )
+        try:
+            high_quality_probes = blast_analyzer.analyze_probes(
+                high_quality_probes, output_path
+            )
+
+            # Report BLAST statistics
+            unique_count = sum(1 for p in high_quality_probes if p.get("BLAST_Unique", False))
+            console.print(f"✅ BLAST analysis completed")
+            console.print(f"  Unique probes (1 hit): {unique_count}")
+            console.print(f"  Multi-target probes: {len(high_quality_probes) - unique_count}")
+
+            # Filter to keep only BLAST-unique probes
+            if config.get("filter_unique_blast_hits", True):
+                high_quality_probes = [p for p in high_quality_probes if p.get("BLAST_Unique", False)]
+                console.print(f"  [green]Filtered to unique only: {len(high_quality_probes)} probes[/green]")
+
+        except Exception as e:
+            console.print(f"❌ BLAST analysis failed: {str(e)}")
+            console.print("[yellow]Continuing without BLAST filtering...[/yellow]")
+    else:
+        console.print(
+            "\n[yellow]Step 5: BLAST analysis skipped (disabled in config)[/yellow]"
+        )
+
+    # Step 6: Generate output files (Candidates and Final Selection)
     console.print(
-        f"\n[bold cyan]Step 5: Generating focused output files...[/bold cyan]"
+        f"\n[bold cyan]Step 6: Generating output files...[/bold cyan]"
     )
 
     try:
-        output_files = output_generator.generate_focused_outputs(
-            high_quality_probes, output_path
+        # 1. Generate Candidate Probes (Pre-BLAST)
+        candidate_files = output_generator.generate_focused_outputs(
+            high_quality_probes, output_path, file_prefix="FISH_RT_probes_PRE_BLAST_CANDIDATES"
+        )
+
+        # 2. Generate Final Selected Probes (Post-BLAST)
+        # Note: high_quality_probes list was filtered by BLAST above if enabled
+        final_files = output_generator.generate_focused_outputs(
+            high_quality_probes, output_path, file_prefix="FISH_RT_probes_FINAL_SELECTION"
         )
 
         console.print("[bold green]✅ Pipeline completed successfully![/bold green]")
-        console.print(f"[green]Generated files:[/green]")
-        for file_path in output_files:
+        console.print(f"[green]Final selection files:[/green]")
+        for file_path in final_files:
             console.print(f" 📄 {file_path}")
 
         # Final summary
-        if output_files:
-            csv_files = [f for f in output_files if str(f).endswith(".csv")]
+        if final_files:
+            csv_files = [f for f in final_files if str(f).endswith(".csv")]
             if csv_files:
-                df_filt = pd.read_csv(csv_files[0])
+                df_final = pd.read_csv(csv_files[0])
                 console.print(f"\n[bold]📊 Final Summary:[/bold]")
-                console.print(f" High-quality probes: {len(df_filt)}")
-                console.print(f" Genes processed: {len(set(df_filt['GeneName']))}")
+                console.print(f" Selected probes: {len(df_final)}")
+                console.print(f" Genes processed: {len(set(df_final['GeneName']))}")
                 console.print(f" Output directory: {output_path}")
 
-                if "SNPs_Covered_Count" in df_filt.columns:
-                    avg_snps = df_filt["SNPs_Covered_Count"].mean()
-                    high_snp_final = (
-                        df_filt["SNPs_Covered_Count"]
-                        >= config["min_snp_coverage_for_final"]
-                    ).sum()
+                if "SNP_Count" in df_final.columns:
+                    avg_snps = df_final["SNP_Count"].mean()
                     console.print(f" Average SNPs covered: {avg_snps:.1f}")
-                    console.print(
-                        f" Probes with ≥{config['min_snp_coverage_for_final']} SNPs: {high_snp_final}"
-                    )
 
     except Exception as e:
         console.print(f"[red]❌ Output generation failed: {str(e)}[/red]")

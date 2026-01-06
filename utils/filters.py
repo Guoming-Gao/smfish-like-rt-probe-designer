@@ -66,6 +66,15 @@ def is_it_ok_4_c_spec_stack(seq):
     return True
 
 
+def is_ok_4_homopolymer(seq, max_len=4):
+    """Filter out sequences with homo-polymers longer than max_len"""
+    seq = seq.upper()
+    for base in ["A", "T", "C", "G"]:
+        if base * (max_len + 1) in seq:
+            return False
+    return True
+
+
 def is_ok_4_gc_filter(seq, min_gc=0.4, max_gc=0.6):
     """GC content filter matching R script logic"""
     gc_content = gc_fraction(seq.upper())

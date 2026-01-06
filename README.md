@@ -5,45 +5,131 @@ Design focused RT primers for SWIFT-seq using smFISH probe design principles (Ol
 ## Quick Start
 
 ```bash
-pip install -r requirements.txt
+conda activate blast
 python main.py --genes Nanog Pou5f1 Xist --output ./my_output
 ```
 
 ## Pipeline Overview
 
 ```
-Gene Symbols → [GTF/FASTA] → [Oligostan dG37] → [Filters] → [VCF SNP Analysis] → Output
+Gene Symbols → [GTF/FASTA] → [Oligostan dG37] → [Filters] → [SNP Analysis] → [Local BLAST] → Output
 ```
 
 1. **Fetch sequences** from GTF + FASTA (supports gzipped refGene format)
 2. **Design primers** (26-32 nt) using Oligostan thermodynamic optimization (dG37 = -32.0)
 3. **Filter** by GC content (40-60%), PNAS rules, dustmasker
-4. **Analyze SNPs** in RT coverage region (100 nt downstream) using VCF with tabix
-5. **Output** CSV and FASTA files with RTBC barcodes for SWIFT-seq
+4. **Analyze SNPs** in RT coverage region (200 nt upstream of probe) using VCF with tabix
+5. **Local BLAST** for specificity validation (requires mm10 BLAST database)
+6. **Output** CSV and FASTA files with RTBC barcodes for SWIFT-seq
+
+---
+
+## RT Coverage and SNP Detection Logic
+
+The key to understanding SNP coverage is the directionality of RT extension:
+
+### For **+ strand** genes (e.g., Nanog on chr6):
+
+```
+                        gene direction →
+                        mRNA 5'→3'
+                        ─────────────────────────────────────────▶
+Genomic DNA:  5'═══════════════════════════════════════════════════3'
+                        ▲           ▲
+                        │           │
+              RT region │  probe    │
+              (200 bp)  │  binds    │
+              ◀─────────┤  here     │
+                        │           │
+RT extends this way ◀───┘           │
+(3'→5' on mRNA)                     │
+                                    ▼
+                        ┌───────────┐
+Probe (DNA):            │ 5'────3'  │  (complementary to mRNA)
+                        └───────────┘
+                              │
+                              ▼ RT extends
+                        ┌─────────────────────────┐
+RT Product (cDNA):      │ 5'────────────────────3'│  (extends ~200bp UPSTREAM)
+                        └─────────────────────────┘
+                        ◀─────────────────────────▶
+                        RT_Region_Start    Probe_End
+                        (lower coords)     (higher coords)
+```
+
+**+ strand summary:**
+- Probe binds at `Probe_Start..Probe_End` (higher genomic coordinates)
+- RT extends **UPSTREAM** (toward lower genomic coordinates)
+- `RT_Region = [Probe_Start - 200, Probe_Start - 1]`
+- SNPs checked in RT region for allelic distinction
+
+---
+
+### For **- strand** genes (e.g., Xist on chrX):
+
+```
+                        ◀ gene direction
+                          mRNA 5'→3'
+                        ◀─────────────────────────────────────────
+Genomic DNA:  5'═══════════════════════════════════════════════════3'
+                                    ▲           ▲
+                                    │           │
+                                 probe      RT region
+                                 binds      (200 bp)
+                                 here       ─────────▶
+                                    │
+                                    └───▶ RT extends this way
+                                          (3'→5' on mRNA)
+
+                        ┌───────────┐
+Probe (DNA):            │ 5'────3'  │  (complementary to mRNA)
+                        └───────────┘
+                              │
+                              ▼ RT extends
+                        ┌─────────────────────────┐
+RT Product (cDNA):      │ 5'────────────────────3'│  (extends ~200bp DOWNSTREAM)
+                        └─────────────────────────┘
+                        ◀─────────────────────────▶
+                        Probe_Start       RT_Region_End
+                        (lower coords)    (higher coords)
+```
+
+**- strand summary:**
+- Probe binds at `Probe_Start..Probe_End` (lower genomic coordinates)
+- RT extends **DOWNSTREAM** (toward higher genomic coordinates)
+- `RT_Region = [Probe_End + 1, Probe_End + 200]`
+- SNPs checked in RT region for allelic distinction
+
+---
+
+### Key Insight
+
+**RT always extends 3'→5' on the mRNA template**, which means:
+- `+ strand gene`: RT goes toward **lower** genomic coordinates (upstream)
+- `- strand gene`: RT goes toward **higher** genomic coordinates (downstream)
+
+This is critical for correct SNP coverage calculation!
+
+---
 
 ## Output Files
 
 | Step | File | Description |
 |------|------|-------------|
-| 1 | `FISH_RT_probes_FILTERED.csv` | All primers passing quality filters |
-| 1 | `FISH_RT_probes_HIGH_SNP_5plus.csv` | Primers with ≥5 B6/Cast SNP differences |
-| 1 | `FISH_RT_probe_sequences_for_BLAST.fasta` | For NCBI BLAST validation |
-| 2 | `FISH_RT_probes_TOP10.csv` | Top N per gene (via `probe_picker_gui.py`) |
-| 4 | `*_UNIQUE_HITS.csv` | Final synthesis-ready primers (via `top_probes_blast_analysis.py`) |
+| 1 | `FISH_RT_probes_PRE_BLAST_CANDIDATES.csv` | Intermediate: All high-quality candidates before BLAST |
+| 1 | `FISH_RT_probes_FINAL_SELECTION.csv` | **Main Output**: Final probe set after all filters + BLAST |
+| 1 | `FISH_RT_probes_FINAL_SELECTION.fasta` | FASTA format for synthesis (with RTBC if enabled) |
+| 1 | `FISH_RT_probes_FINAL_SELECTION_summary.txt` | Design statistics and quality summary |
 
 ## Workflow
 
 ```bash
-# Step 1: Design primers
+# Single command - runs entire pipeline including local BLAST
+conda activate blast
+python main.py --genes Nanog Xist Mecp2 --output ./results
+
+# Or run with all 21 test genes
 python main.py --test --output ./results
-
-# Step 2: Select top primers per gene (GUI)
-python probe_picker_gui.py
-
-# Step 3: BLAST validation (manual at NCBI)
-
-# Step 4: Filter for unique hits
-python top_probes_blast_analysis.py
 ```
 
 ## Configuration
@@ -63,7 +149,8 @@ FISH_RT_CONFIG = {
 
     # Parameters
     "rt_coverage_downstream": 100,      # nt downstream for SNP detection
-    "min_snp_coverage_for_final": 5,    # Minimum B6/Cast SNP differences
+    "max_probes_per_gene": 200,         # Maximum probes per gene
+    "min_snps_for_selection": 3,        # Min SNPs to include probe in selection
     "fixed_dg37_value": -32.0,          # Target Gibbs free energy
     "probe_length_min": 26,
     "probe_length_max": 32,

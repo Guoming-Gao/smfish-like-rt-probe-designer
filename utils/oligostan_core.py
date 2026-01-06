@@ -242,28 +242,45 @@ def design_fish_probes(gene_data, config):
                 "Chromosome": gene_data["chromosome"],
                 "RegionType": region_type,  # 'exon', 'intron', or 'exon-intron'
 
-                # FIXED: Proper sequence assignment
-                "Seq": probe_sequence,              # ACTUAL PROBE SEQUENCE (reverse complement)
-                "Target_Seq": target_sequence,      # TARGET REGION (for reference/SNP analysis)
-                "ProbeSize": probe["size"],
-                "theStartPos": genomic_start,       # mm10 genomic coordinates
-                "theEndPos": genomic_end,           # mm10 genomic coordinates
+                # Probe sequences
+                # Probe_Seq = actual oligo sequence (reverse complement of target, same as RT product)
+                # Target_Seq = the mRNA region the probe hybridizes to
+                "Probe_Seq": probe_sequence,
+                "Target_Seq": target_sequence,
+                "Probe_Length": probe["size"],
 
-                # Strand information (CRITICAL for RT coverage)
-                "Target_Strand": target_strand,     # Gene's RNA strand
-                "Probe_Strand": probe_strand,       # Probe's strand (opposite)
+                # Probe genomic coordinates (mm10)
+                "Probe_Start": genomic_start,
+                "Probe_End": genomic_end,
 
-                # Thermodynamic properties
-                "dGOpt": desired_dg,
-                "dGScore": probe["score"],
+                # Strand information
+                # Target_Strand = strand of the gene/mRNA (+ or -)
+                # Probe binds to mRNA, so probe sequence is complementary to mRNA
+                # RT product (cDNA) has same sequence as probe
+                "Target_Strand": target_strand,
+
+                # Placeholders for SNP analysis (will be filled by snp_analyzer)
+                "SNP_Count": 0,
+                "SNPs_Positions": "",  # List of individual SNP positions
+                "SNPs_Types": "",      # B6/Cast genotypes at each position
+                "RT_Region_Start": 0,  # Start of RT extension region
+                "RT_Region_End": 0,    # End of RT extension region
+                "RT_Product_Seq": "",  # RT product sequence (extracted from genome)
+                "Full_Oligo_Seq": "",  # Will be added by output generator (with RTBC barcode)
+
+                # BLAST specificity (will be filled by blast_analyzer)
+                "BLAST_Hits": 0,       # Number of genomic BLAST hits
+                "BLAST_Identity": 0,   # % identity of best hit
+                "BLAST_Unique": False, # True if exactly 1 hit (specific probe)
+                "BLAST_Hit_Name": "",  # Name of unique hit target
+
+                # Quality metrics - Oligostan inherited (kept for compatibility)
                 "dG37": actual_dg37,
-
-                # Quality metrics
-                "GCpc": gc_percentage,
+                "dGScore": probe["score"],
+                "dGOpt": desired_dg,
+                "GC_Content": gc_percentage,
                 "GCFilter": 1 if gc_filter else 0,
                 "PNASFilter": 1 if pnas_filter else 0,
-
-                # Individual PNAS filter results
                 "aCompFilter": a_comp_pass,
                 "aStackFilter": a_stack_pass,
                 "cCompFilter": c_comp_pass,
@@ -271,17 +288,7 @@ def design_fish_probes(gene_data, config):
                 "cSpecStackFilter": c_spec_pass,
                 "NbOfPNAS": nb_of_pnas,
 
-                # Placeholders for SNP analysis (will be filled by snp_analyzer)
-                "SNPs_Covered_Count": 0,
-                "SNPs_Covered_Positions": "",
-                "SNPs_Covered_Types": "",
-                "RT_Coverage_Start": 0,
-                "RT_Coverage_End": 0,
-                "RT_Coverage_Strand": ".",
-                "RTBC_5Prime_Sequence": "",  # Will be added by output generator
-
-                # Additional fields for compatibility
-                "InsideUTR": 0,  # Default value
+                # Masking filters
                 "MaskedFilter": 1,  # Default pass (dustmasker not enabled)
                 "RepeatMaskerPC": 0.0,  # Default no masking
             }
