@@ -15,7 +15,6 @@ from config import FISH_RT_CONFIG
 from gene_fetcher import GeneSequenceFetcher
 from utils.oligostan_core import design_fish_probes
 from snp_analyzer import SNPCoverageAnalyzer
-from blast_analyzer import BLASTSpecificityAnalyzer
 from output_generator import OutputGenerator
 from utils.filters import is_ok_4_homopolymer
 
@@ -231,7 +230,6 @@ def main():
     console.print("\n[bold]Initializing pipeline components...[/bold]")
     gene_fetcher = GeneSequenceFetcher(config)
     snp_analyzer = SNPCoverageAnalyzer(config) if config["snp_file_path"] else None
-    blast_analyzer = BLASTSpecificityAnalyzer(config) if config.get("run_local_blast", True) else None
     output_generator = OutputGenerator(config)
 
     # Step 1: Fetch gene sequences
@@ -340,70 +338,37 @@ def main():
     )
     console.print(f"[green]High-quality probes selected: {len(high_quality_probes)}[/green]")
 
-    # Step 5: BLAST specificity analysis (optional)
-    if blast_analyzer:
-        console.print(
-            f"\n[bold cyan]Step 5: BLAST specificity analysis...[/bold cyan]"
-        )
-        try:
-            high_quality_probes = blast_analyzer.analyze_probes(
-                high_quality_probes, output_path
-            )
-
-            # Report BLAST statistics
-            unique_count = sum(1 for p in high_quality_probes if p.get("BLAST_Unique", False))
-            console.print(f"✅ BLAST analysis completed")
-            console.print(f"  Unique probes (1 hit): {unique_count}")
-            console.print(f"  Multi-target probes: {len(high_quality_probes) - unique_count}")
-
-            # Filter to keep only BLAST-unique probes
-            if config.get("filter_unique_blast_hits", True):
-                high_quality_probes = [p for p in high_quality_probes if p.get("BLAST_Unique", False)]
-                console.print(f"  [green]Filtered to unique only: {len(high_quality_probes)} probes[/green]")
-
-        except Exception as e:
-            console.print(f"❌ BLAST analysis failed: {str(e)}")
-            console.print("[yellow]Continuing without BLAST filtering...[/yellow]")
-    else:
-        console.print(
-            "\n[yellow]Step 5: BLAST analysis skipped (disabled in config)[/yellow]"
-        )
-
-    # Step 6: Generate output files (Candidates and Final Selection)
+    # Step 5: Generate Candidate output files
     console.print(
-        f"\n[bold cyan]Step 6: Generating output files...[/bold cyan]"
+        f"\n[bold cyan]Step 5: Generating candidate output files...[/bold cyan]"
     )
 
     try:
-        # 1. Generate Candidate Probes (Pre-BLAST)
+        # Generate Candidate Probes
         candidate_files = output_generator.generate_focused_outputs(
-            high_quality_probes, output_path, file_prefix="FISH_RT_probes_PRE_BLAST_CANDIDATES"
+            high_quality_probes, output_path, file_prefix="FISH_RT_probes_CANDIDATES"
         )
 
-        # 2. Generate Final Selected Probes (Post-BLAST)
-        # Note: high_quality_probes list was filtered by BLAST above if enabled
-        final_files = output_generator.generate_focused_outputs(
-            high_quality_probes, output_path, file_prefix="FISH_RT_probes_FINAL_SELECTION"
-        )
-
-        console.print("[bold green]✅ Pipeline completed successfully![/bold green]")
-        console.print(f"[green]Final selection files:[/green]")
-        for file_path in final_files:
+        console.print("[bold green]✅ Phase 1: Candidate Design completed successfully![/bold green]")
+        console.print(f"[green]Candidate files generated:[/green]")
+        for file_path in candidate_files:
             console.print(f" 📄 {file_path}")
 
         # Final summary
-        if final_files:
-            csv_files = [f for f in final_files if str(f).endswith(".csv")]
+        if candidate_files:
+            csv_files = [f for f in candidate_files if str(f).endswith(".csv")]
             if csv_files:
-                df_final = pd.read_csv(csv_files[0])
-                console.print(f"\n[bold]📊 Final Summary:[/bold]")
-                console.print(f" Selected probes: {len(df_final)}")
-                console.print(f" Genes processed: {len(set(df_final['GeneName']))}")
+                df_cand = pd.read_csv(csv_files[0])
+                console.print(f"\n[bold]📊 Design Summary:[/bold]")
+                console.print(f" Candidate probes: {len(df_cand)}")
+                console.print(f" Genes processed: {len(set(df_cand['GeneName']))}")
                 console.print(f" Output directory: {output_path}")
 
-                if "SNP_Count" in df_final.columns:
-                    avg_snps = df_final["SNP_Count"].mean()
+                if "SNP_Count" in df_cand.columns:
+                    avg_snps = df_cand["SNP_Count"].mean()
                     console.print(f" Average SNPs covered: {avg_snps:.1f}")
+
+        console.print("\n[bold yellow]Next Step:[/bold yellow] Run BLAST analysis on the candidates FASTA file to ensure specificity.")
 
     except Exception as e:
         console.print(f"[red]❌ Output generation failed: {str(e)}[/red]")

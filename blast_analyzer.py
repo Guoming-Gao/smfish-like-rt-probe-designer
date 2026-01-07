@@ -170,9 +170,9 @@ class BLASTSpecificityAnalyzer:
             probe_name_search = re.search(r'^(\S+)', query)
             probe_name = probe_name_search.group(1) if probe_name_search else None
 
-            # Count alignment sections starting with ">"
-            alignment_headers = re.findall(r'^>([^\n]+)', query, re.MULTILINE)
-            num_hits = len(alignment_headers)
+            # Count individual High Scoring Pairs (HSPs) instead of just subjects
+            # Each alignment section starts with " Score ="
+            num_hits = len(re.findall(r' Score =', query))
 
             # Extract unique hit name if only one hit
             unique_hit_name = None

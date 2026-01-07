@@ -36,9 +36,8 @@ def parse_blast_results(blast_text):
             )
             gene_name = None
 
-        # Count alignment sections starting with ">"
-        alignment_headers = re.findall(r"^>([^\n]+)", query, re.MULTILINE)
-        num_hits = len(alignment_headers)
+        # Count individual High Scoring Pairs (HSPs) instead of just subjects
+        num_hits = len(re.findall(r" Score =", query))
 
         # Extract unique hit name if only one hit
         unique_hit_name = None

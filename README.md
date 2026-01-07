@@ -11,16 +11,18 @@ python main.py --genes Nanog Pou5f1 Xist --output ./my_output
 
 ## Pipeline Overview
 
-```
-Gene Symbols → [GTF/FASTA] → [Oligostan dG37] → [Filters] → [SNP Analysis] → [Local BLAST] → Output
-```
+1. **Phase 1: Candidate Generation** (`design_candidate_probes.py`)
+   - Fetch sequences from GTF + FASTA
+   - Design primers using Oligostan (dG37 = -32.0)
+   - Filter by GC, PNAS rules, and Dustmasker
+   - Analyze SNPs in RT coverage region
+   - Output: `FISH_RT_probes_CANDIDATES.csv/.fasta`
 
-1. **Fetch sequences** from GTF + FASTA (supports gzipped refGene format)
-2. **Design primers** (26-32 nt) using Oligostan thermodynamic optimization (dG37 = -32.0)
-3. **Filter** by GC content (40-60%), PNAS rules, dustmasker
-4. **Analyze SNPs** in RT coverage region (200 nt upstream of probe) using VCF with tabix
-5. **Local BLAST** for specificity validation (requires mm10 BLAST database)
-6. **Output** CSV and FASTA files with RTBC barcodes for SWIFT-seq
+2. **Phase 2: Specificity Validation** (`validate_probe_specificity.py`)
+   - Automated `blastn` specificity check
+   - HSP-aware hit counting logic
+   - Merges BLAST results with candidate data
+   - Output: `FISH_RT_probes_FINAL_SELECTION.csv`
 
 ---
 
@@ -116,20 +118,20 @@ This is critical for correct SNP coverage calculation!
 
 | Step | File | Description |
 |------|------|-------------|
-| 1 | `FISH_RT_probes_PRE_BLAST_CANDIDATES.csv` | Intermediate: All high-quality candidates before BLAST |
-| 1 | `FISH_RT_probes_FINAL_SELECTION.csv` | **Main Output**: Final probe set after all filters + BLAST |
-| 1 | `FISH_RT_probes_FINAL_SELECTION.fasta` | FASTA format for synthesis (with RTBC if enabled) |
-| 1 | `FISH_RT_probes_FINAL_SELECTION_summary.txt` | Design statistics and quality summary |
+| 1 | `FISH_RT_probes_CANDIDATES.csv` | All high-quality candidates before BLAST |
+| 2 | `FISH_RT_probes_FINAL_SELECTION.csv` | **Main Output**: Final probe set after BLAST filtering |
+| 2 | `FISH_RT_probes_FINAL_SELECTION.fasta` | FASTA format for synthesis |
+| 2 | `FISH_RT_probes_FINAL_SELECTION_summary.txt` | Design statistics and quality summary |
 
 ## Workflow
 
 ```bash
-# Single command - runs entire pipeline including local BLAST
+# Phase 1: Generate candidates (Design + SNPs)
 conda activate blast
-python main.py --genes Nanog Xist Mecp2 --output ./results
+python design_candidate_probes.py --genes Nanog Xist --output ./results
 
-# Or run with all 21 test genes
-python main.py --test --output ./results
+# Phase 2: Run Specificity Validation (BLAST + Filtering)
+python validate_probe_specificity.py --candidates ./results/FISH_RT_probes_CANDIDATES.csv --output-dir ./results
 ```
 
 ## Configuration
@@ -205,12 +207,13 @@ The VCF-based approach finds more high-SNP probes by properly filtering for B6 v
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Pipeline orchestration |
+| `design_candidate_probes.py` | Phase 1: Candidate Design & SNPs |
+| `validate_probe_specificity.py` | Phase 2: BLAST & Hit Filtering |
 | `config.py` | All configuration parameters |
 | `gene_fetcher.py` | GTF/FASTA parsing (gzip support) |
 | `snp_analyzer.py` | VCF-based SNP analysis with pysam/tabix |
-| `probe_picker_gui.py` | Interactive primer selection |
-| `top_probes_blast_analysis.py` | BLAST result filtering |
+| `design_forward_primers.py` | Automated Primer3-based primer design |
+| `add_rtbc_barcode.py` | Post-processing with synthesis barcodes |
 
 ## Citation
 
