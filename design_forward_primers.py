@@ -143,15 +143,22 @@ PRIMER_MAX_SELF_END=3.0
                 seq = ""
                 tm = 0.0
                 gc = 0.0
+                pos = 0
                 for line in output.strip().split('\n'):
-                    if line.startswith(f"PRIMER_LEFT_{i}_SEQUENCE="): seq = line.split('=')[1]
-                    if line.startswith(f"PRIMER_LEFT_{i}_TM="): tm = float(line.split('=')[1])
-                    if line.startswith(f"PRIMER_LEFT_{i}_GC_PERCENT="): gc = float(line.split('=')[1])
+                    if '=' not in line: continue
+                    key, val = line.split('=', 1)
+                    if key == f"PRIMER_LEFT_{i}_SEQUENCE": seq = val
+                    if key == f"PRIMER_LEFT_{i}_TM": tm = float(val)
+                    if key == f"PRIMER_LEFT_{i}_GC_PERCENT": gc = float(val)
+                    if key == f"PRIMER_LEFT_{i}":
+                        # Format is pos,len
+                        pos = int(val.split(',')[0])
 
                 primers.append({
                     'sequence': seq,
                     'tm': tm,
-                    'gc': gc
+                    'gc': gc,
+                    'position': pos
                 })
         return primers
     except Exception as e:
@@ -307,14 +314,18 @@ def design_forward_primers(input_file: str, output_file: str,
 
         # Calculate region to search for forward primer
         # Forward primer should be upstream of RT probe.
-        # We expand search AWAY from the probe to ensure >= 200bp product.
+        # We expand search AWAY from the probe to ensure the PCR product covers the RT region.
+        # User specified: search region follows rt_coverage_downstream + 50
+        min_dist = int(args.rt_coverage) + 50
+        max_dist = int(args.max_distance)
+
         if strand == 1:  # Plus strand: primer upstream (lower coords)
-            search_start = probe_start - int(args.max_distance)
-            search_end = probe_start - 200
+            search_start = probe_start - max_dist
+            search_end = probe_start - min_dist
         else:  # Minus strand
             # Forward primer region is downstream (larger coordinates)
-            search_start = probe_end + 200
-            search_end = probe_end + int(args.max_distance)
+            search_start = probe_end + min_dist
+            search_end = probe_end + max_dist
 
         target_in_seq = 100 # Not strictly used with pick_left_only and open template
 
@@ -353,9 +364,22 @@ def design_forward_primers(input_file: str, output_file: str,
             forward_primers.append(selected_primer['sequence'])
             forward_tms.append(selected_primer['tm'])
             forward_gcs.append(selected_primer['gc'])
-            pcr_size = target_distance + len(row.get('Probe_Seq', ''))
+            # Calculate PCR size correctly: |ProbeSite - PrimerSite|
+            # ProbeSite is probe_start (for + strand) or probe_end (for - strand)
+            # Primer site is relative to search_start
+            p_pos = selected_primer['position'] # 0-based index in template string
+            if strand == 1:
+                # Plus strand: Template is [search_start, search_end]
+                primer_genomic_pos = search_start + p_pos
+                pcr_size = probe_start - primer_genomic_pos
+            else:
+                # Minus strand: Template is RC of [search_start, search_end]
+                # Index 0 is search_end
+                primer_genomic_pos = search_end - p_pos
+                pcr_size = primer_genomic_pos - probe_end
+
             pcr_sizes.append(pcr_size)
-            rt_covered.append(pcr_size >= 200)
+            rt_covered.append(pcr_size >= int(args.rt_coverage))
         else:
             forward_primers.append('')
             forward_tms.append(0)
@@ -407,6 +431,11 @@ def main():
         help="Maximum upstream search distance (default: 750bp)"
     )
     parser.add_argument(
+        "--rt-coverage",
+        type=int, default=None,
+        help="RT coverage length in nt (default: config value or 200)"
+    )
+    parser.add_argument(
         "--primer-length-min", type=int, default=18,
         help="Minimum primer length (default: 18)"
     )
@@ -440,6 +469,10 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Load RT coverage from config if not provided
+    rt_coverage = args.rt_coverage if args.rt_coverage is not None else FISH_RT_CONFIG.get("rt_coverage_downstream", 200)
+    args.rt_coverage = rt_coverage  # Update args for use in functions
 
     design_forward_primers(
         args.input, args.output,

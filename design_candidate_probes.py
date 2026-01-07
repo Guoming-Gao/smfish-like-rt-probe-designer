@@ -189,6 +189,10 @@ def main():
         "--min-snps", type=int, default=None,
         help="Min SNPs for probe selection (default: config value or 3)"
     )
+    parser.add_argument(
+        "--rt-coverage", type=int, default=None,
+        help="RT coverage length in nt (default: config value or 200)"
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -198,8 +202,12 @@ def main():
     if args.output:
         config["output_directory"] = args.output
         console.print(f"[yellow]Using custom output directory: {args.output}[/yellow]")
-    else:
-        console.print(f"[green]Using config default output directory[/green]")
+    if args.rt_coverage:
+        config["rt_coverage_downstream"] = args.rt_coverage
+        console.print(f"[yellow]Using custom RT coverage: {args.rt_coverage} nt[/yellow]")
+
+    if not args.output and not args.rt_coverage:
+        console.print(f"[green]Using config default settings[/green]")
 
     # Determine gene list
     if args.genes:

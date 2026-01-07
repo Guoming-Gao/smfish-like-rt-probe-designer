@@ -17,7 +17,7 @@ FISH_RT_CONFIG = {
     "vcf_b6_sample": "C57BL_6NJ",  # B6 reference strain
     "vcf_cast_sample": "CAST_EiJ",  # Cast strain for allelic analysis
     # RT COVERAGE SETTINGS - RT extends 3'→5' on mRNA (upstream direction)
-    "rt_coverage_downstream": 200,  # nt that RT extends (based on experimental data showing >200nt products)
+    "rt_coverage_downstream": 500,  # nt that RT extends (based on experimental data showing >200nt products)
     "include_probe_in_coverage": False,  # Strictly downstream
     "extract_rt_sequence": True,  # Extract RT product sequence for output
     # RTBC BARCODE SETTINGS
@@ -41,7 +41,7 @@ FISH_RT_CONFIG = {
 
     "max_homopolymer_length": 4,  # Consecutive bases allowed (e.g. 4 means AAAAA is blocked)
     # PROBE SELECTION SETTINGS
-    "max_probes_per_gene": 200,       # Maximum probes per gene (was hardcoded 50)
+    "max_probes_per_gene": 500,       # Maximum probes per gene (was hardcoded 50)
     "min_snps_for_selection": 3,      # Minimum SNPs to include probe in selection
     "generate_all_probes_file": False,  # FIXED: Skip ALL.csv generation
     "focus_on_high_quality_only": True,  # FIXED: Only process filtered probes
