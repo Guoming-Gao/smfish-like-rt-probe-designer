@@ -344,8 +344,17 @@ class GeneSequenceFetcher:
 
         exon_regions = []
         for exon in exon_data:
-            rel_start = exon["start"] - gene_start
-            rel_end = exon["end"] - gene_start
+            if gene_info["strand"] == 1:
+                # Forward strand: distance from gene start
+                rel_start = exon["start"] - gene_start
+                rel_end = exon["end"] - gene_start
+            else:
+                # Reverse strand: distance from gene end (since RNA is reverse-complemented)
+                # RNA 5' end starts at genomic end
+                gene_end = gene_info["end"]
+                rel_start = gene_end - exon["end"]
+                rel_end = gene_end - exon["start"]
+
             exon_regions.append(
                 {
                     "start": rel_start,
