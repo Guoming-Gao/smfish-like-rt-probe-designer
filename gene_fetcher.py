@@ -23,6 +23,10 @@ class GeneSequenceFetcher:
         self.gtf_path = config.get("local_gtf_path", "")
         self.genome_fasta_path = config.get("local_genome_fasta_path", "")
         self.transcript_selection = config.get("transcript_selection", "longest")
+        self.transcript_id_override = config.get("transcript_id_override", {})
+        self.aggregate_exons_for_labeling = config.get(
+            "aggregate_exons_for_labeling", True
+        )
 
         # Check if local files exist
         self.use_local_files = os.path.exists(self.gtf_path) and os.path.exists(
@@ -141,6 +145,14 @@ class GeneSequenceFetcher:
                                 {"start": int(start), "end": int(end)}
                             )
 
+            # Post-process transcripts to calculate spliced length
+            for gene_name, transcript_list in transcripts.items():
+                for t in transcript_list:
+                    tid = t["transcript_id"]
+                    t_exons = exons.get(gene_name, {}).get(tid, [])
+                    spliced_length = sum(e["end"] - e["start"] + 1 for e in t_exons)
+                    t["spliced_length"] = spliced_length
+
             # Infer genes from transcripts for refGene format (no explicit "gene" features)
             if len(genes) == 0 and len(transcript_gene_info) > 0:
                 console.print(f"[yellow]No 'gene' features found, inferring from transcripts (refGene format)[/yellow]")
@@ -207,7 +219,7 @@ class GeneSequenceFetcher:
             return None
 
         # Select transcript
-        selected_transcript = self._select_transcript(transcripts)
+        selected_transcript = self._select_transcript(gene_symbol, transcripts)
 
         # FIXED: Extract gene sequence (strand-aware)
         gene_sequence = self._extract_sequence_samtools(
@@ -243,7 +255,9 @@ class GeneSequenceFetcher:
             "sequence_type": "genomic",
             "exon_regions": exon_intron_regions["exons"],
             "intron_regions": exon_intron_regions["introns"],
-            "transcript_length": selected_transcript["length"],
+            "all_known_exons": exon_intron_regions["all_known_exons"],
+            "transcript_length": selected_transcript["spliced_length"],
+            "genomic_span": selected_transcript["length"],
             "genome_build": "GRCm38",
             "source": "local_files",
         }
@@ -322,13 +336,25 @@ class GeneSequenceFetcher:
             return None
 
 
-    def _select_transcript(self, transcripts):
+    def _select_transcript(self, gene_symbol, transcripts):
         """Select transcript based on strategy"""
         if not transcripts:
             return None
 
+        # 1. Check for manual override
+        if gene_symbol in self.transcript_id_override:
+            target_id = self.transcript_id_override[gene_symbol]
+            for t in transcripts:
+                if t["transcript_id"] == target_id:
+                    return t
+            console.print(
+                f"[yellow]⚠️  Override ID {target_id} not found for {gene_symbol}. Falling back to {self.transcript_selection}.[/yellow]"
+            )
+
+        # 2. Strategy-based selection
         if self.transcript_selection == "longest":
-            return max(transcripts, key=lambda t: t.get("length", 0))
+            # Use spliced length (sum of exons)
+            return max(transcripts, key=lambda t: t.get("spliced_length", 0))
         elif self.transcript_selection == "canonical":
             canonical = [t for t in transcripts if t.get("is_canonical")]
             return canonical[0] if canonical else transcripts[0]
@@ -336,25 +362,33 @@ class GeneSequenceFetcher:
             return transcripts[0]
 
     def _get_exon_intron_regions(self, gene_symbol, selected_transcript, gene_info):
-        """Get exon/intron regions relative to gene start"""
+        """
+        Get exon/intron regions relative to gene start (1-indexed inclusive)
+        """
         transcript_id = selected_transcript["transcript_id"]
         gene_start = gene_info["start"]
+        gene_end = gene_info["end"]
+        strand = gene_info["strand"]
 
         exon_data = self.gene_cache["exons"].get(gene_symbol, {}).get(transcript_id, [])
 
+        def get_rel_coords(ex_start, ex_end):
+            """Helper to flip coordinates for reverse strand and convert to 1-indexed"""
+            if strand == 1:
+                # Forward strand: Distance from gene start
+                # Position 1 is at genomic gene_start
+                rel_s = ex_start - gene_start + 1
+                rel_e = ex_end - gene_start + 1
+            else:
+                # Reverse strand: Distance from gene end (RNA 5')
+                # Position 1 is at genomic gene_end
+                rel_s = gene_end - ex_end + 1
+                rel_e = gene_end - ex_start + 1
+            return rel_s, rel_e
+
         exon_regions = []
         for exon in exon_data:
-            if gene_info["strand"] == 1:
-                # Forward strand: distance from gene start
-                rel_start = exon["start"] - gene_start
-                rel_end = exon["end"] - gene_start
-            else:
-                # Reverse strand: distance from gene end (since RNA is reverse-complemented)
-                # RNA 5' end starts at genomic end
-                gene_end = gene_info["end"]
-                rel_start = gene_end - exon["end"]
-                rel_end = gene_end - exon["start"]
-
+            rel_start, rel_end = get_rel_coords(exon["start"], exon["end"])
             exon_regions.append(
                 {
                     "start": rel_start,
@@ -365,23 +399,32 @@ class GeneSequenceFetcher:
                 }
             )
 
-        # Calculate introns
+        # Calculate introns for the selected transcript
         intron_regions = []
         if len(exon_regions) > 1:
             exon_regions.sort(key=lambda x: x["start"])
             for i in range(len(exon_regions) - 1):
                 intron_start = exon_regions[i]["end"] + 1
                 intron_end = exon_regions[i + 1]["start"] - 1
-                if intron_end > intron_start:
-                    intron_regions.append(
-                        {
-                            "start": intron_start,
-                            "end": intron_end,
-                            "length": intron_end - intron_start + 1,
-                        }
-                    )
+                if intron_end >= intron_start:
+                    intron_regions.append({"start": intron_start, "end": intron_end})
 
-        return {"exons": exon_regions, "introns": intron_regions}
+        # Pre-process all known exons for this gene (for aggregate labeling)
+        all_known_exons = []
+        if self.aggregate_exons_for_labeling:
+            seen_exons = set()
+            for tid, ex_list in self.gene_cache["exons"].get(gene_symbol, {}).items():
+                for exon in ex_list:
+                    rel_start, rel_end = get_rel_coords(exon["start"], exon["end"])
+                    if (rel_start, rel_end) not in seen_exons:
+                        all_known_exons.append({"start": rel_start, "end": rel_end})
+                        seen_exons.add((rel_start, rel_end))
+
+        return {
+            "exons": exon_regions,
+            "introns": intron_regions,
+            "all_known_exons": all_known_exons,
+        }
 
     def _generate_mock_sequence(self, length, gene_symbol, strand):
         """Generate realistic mock sequence for demo (strand-aware)"""

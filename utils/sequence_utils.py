@@ -31,12 +31,14 @@ def read_fasta_sequences(file_path):
 
 def determine_region_type(probe_start, probe_end, exon_regions, intron_regions):
     """
-    Determine if probe is in exon, intron, or spans both
+    Determine if probe is in exon, intron, or spans both.
+    Handles 1-indexed inclusive coordinates.
     Returns: 'exon', 'intron', or 'exon-intron'
     """
     # Check overlap with exons
     exon_overlap = False
     for exon in exon_regions:
+        # Standard range overlap check: [s1, e1] overlaps [s2, e2] if s1 <= e2 and e1 >= s2
         if probe_start <= exon["end"] and probe_end >= exon["start"]:
             exon_overlap = True
             break

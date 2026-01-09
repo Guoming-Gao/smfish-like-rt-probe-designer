@@ -114,6 +114,35 @@ This is critical for correct SNP coverage calculation!
 
 ---
 
+## Design Principles and Internal Logic
+
+To ensure accurate probe design and region classification (intron/exon), the pipeline follows these steps:
+
+### 1. Transcript Selection
+By default, the pipeline selects the **"longest spliced" transcript** for each gene (sum of all exon lengths). This ensures that probes are designed against the most comprehensive representation of the gene's mature product.
+- **Customizable**: Users can override this by providing a `transcript_id_override` map in `FISH_RT_CONFIG`.
+- **Ambiguity Handling**: If multiple transcripts share the same maximum length, the first one encountered in the GTF is used.
+
+### 2. Sequence Extraction (Strand-Aware)
+All sequences (gene genomic sequence, RT product sequences, and probe sequences) are stored in the **RNA sense (5'→3')** direction.
+- For **negative strand genes**, this means the genomic region is automatically reverse-complemented before any design steps occur.
+- Probes are designed to be **complementary** to this RNA sense sequence.
+
+### 3. Coordinate System (1-indexed inclusive)
+The pipeline uses a unified **1-indexed inclusive** system for all relative coordinates:
+- The first base of the extracted gene sequence is **Position 1**.
+- Exon and intron regions are defined as inclusive ranges `[start, end]`.
+- A probe binding at `[70, 100]` is 31nt long and covers those exact positions.
+
+### 4. Region Classification (Intron vs Exon)
+A probe's `RegionType` is determined by its overlap with the selected transcript's exons and introns:
+- **exon**: All bases of the probe overlap with one or more exons.
+- **intron**: All bases of the probe overlap with one or more introns.
+- **exon-intron**: The probe spans a junction between an exon and an intron.
+- **Robustness**: As a safety measure, a probe is labeled **exon** if it overlaps with an exon in *any* known transcript for that gene, preventing accidental targeting of splicing variants.
+
+---
+
 ## Output Files
 
 | Step | File | Description |

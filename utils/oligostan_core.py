@@ -193,10 +193,13 @@ def design_fish_probes(gene_data, config):
                 probe_strand = "+"  # Probe is complementary
 
             # Determine if probe is in exon or intron
+            # Use all_known_exons for more robust labeling if requested
+            exons_to_check = gene_data.get("all_known_exons", gene_data["exon_regions"])
+
             region_type = determine_region_type(
                 probe["position"],
                 probe["position"] + probe["size"] - 1,
-                gene_data["exon_regions"],
+                exons_to_check,
                 gene_data["intron_regions"],
             )
 
