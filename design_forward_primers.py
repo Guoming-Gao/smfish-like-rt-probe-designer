@@ -52,7 +52,7 @@ def extract_target_sequence(chrom: str, start: int, end: int, strand: int,
             subprocess.run(["samtools", "--version"], capture_output=True, check=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             search_paths = [
-                "/opt/miniconda3/envs/blast/bin/samtools",
+                "/opt/miniconda3/envs/bioinfo/bin/samtools",
                 "/usr/local/bin/samtools",
                 "/usr/bin/samtools"
             ]
@@ -122,7 +122,7 @@ PRIMER_MAX_SELF_END=3.0
         subprocess.run(["primer3_core", "--version"], capture_output=True, check=False)
     except (subprocess.CalledProcessError, FileNotFoundError):
         search_paths = [
-            "/opt/miniconda3/envs/blast/bin/primer3_core",
+            "/opt/miniconda3/envs/bioinfo/bin/primer3_core",
             "/usr/local/bin/primer3_core",
             "/usr/bin/primer3_core"
         ]
@@ -200,7 +200,7 @@ def validate_primer_specificity(sequence: str, genome_fasta_or_db: str) -> bool:
         # Find blastn in common locations
         blastn_exec = "blastn"
         search_paths = [
-            "/opt/miniconda3/envs/blast/bin/blastn",
+            "/opt/miniconda3/envs/bioinfo/bin/blastn",
             "/usr/local/bin/blastn",
             "/usr/bin/blastn"
         ]

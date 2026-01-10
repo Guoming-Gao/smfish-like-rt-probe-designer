@@ -5,7 +5,7 @@ Design focused RT primers for SWIFT-seq using smFISH probe design principles (Ol
 ## Quick Start
 
 ```bash
-conda activate blast
+conda activate bioinfo
 python main.py --genes Nanog Pou5f1 Xist --output ./my_output
 ```
 
@@ -156,7 +156,7 @@ A probe's `RegionType` is determined by its overlap with the selected transcript
 
 ```bash
 # Phase 1: Generate candidates (Design + SNPs)
-conda activate blast
+conda activate bioinfo
 python design_candidate_probes.py --genes Nanog Xist --output ./results
 
 # Phase 2: Run Specificity Validation (BLAST + Filtering)
